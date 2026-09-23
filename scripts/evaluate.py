@@ -4,12 +4,15 @@ Usage:
     uv run scripts/evaluate.py [--labels data/labels.json] [--iou 0.5] [--errors]
     uv run scripts/evaluate.py --record --note "baseline"
     uv run scripts/evaluate.py --history
+    uv run scripts/evaluate.py --labels data/holdout/synthetic.json --group-by '/([^/]+)/[^/]+$' --breakdown
 """
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,8 +28,10 @@ HISTORY_PATH = REPO_ROOT / "evaluations" / "history.jsonl"
 Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
 
 
-def load_ground_truth(labels_path: Path) -> dict[Path, list[tuple[Box, str]]]:
-    """Label Studio export -> {image: [(box, label), ...]}, first annotation per task."""
+def load_ground_truth(labels_path: Path) -> dict[Path, list[tuple[Box, str, list[str]]]]:
+    """Label Studio export -> {image: [(box, label, tags), ...]}, first annotation per task.
+
+    Tags come from the region's meta text (set by the synthetic generator)."""
     gt = {}
     for task in json.loads(labels_path.read_text()):
         image = REPO_ROOT / unquote(task["data"]["image"].split("?d=")[-1])
@@ -39,7 +44,8 @@ def load_ground_truth(labels_path: Path) -> dict[Path, list[tuple[Box, str]]]:
                 continue
             v, w, h = r["value"], r["original_width"], r["original_height"]
             x1, y1 = v["x"] * w / 100, v["y"] * h / 100
-            boxes.append(((x1, y1, x1 + v["width"] * w / 100, y1 + v["height"] * h / 100), v["rectanglelabels"][0]))
+            box = (x1, y1, x1 + v["width"] * w / 100, y1 + v["height"] * h / 100)
+            boxes.append((box, v["rectanglelabels"][0], r.get("meta", {}).get("text", [])))
         gt[image] = boxes
     return gt
 
@@ -70,7 +76,7 @@ def match(preds: list[tuple[Box, str]], gts: list[tuple[Box, str]], min_iou: flo
     return matches
 
 
-def evaluate_image(image: Path, gts: list[tuple[Box, str]], min_iou: float) -> dict:
+def evaluate_image(image: Path, gts: list[tuple[Box, str, list[str]]], min_iou: float) -> dict:
     img = cv2.imread(str(image))
     if img is None:
         raise ValueError(f"Could not read {image}")
@@ -78,6 +84,7 @@ def evaluate_image(image: Path, gts: list[tuple[Box, str]], min_iou: float) -> d
     matches = match(preds, gts, min_iou)
     matched_p = {i for i, _, _ in matches}
     matched_g = {j for _, j, _ in matches}
+    pred_of = {j: i for i, j, _ in matches}
 
     def fmt(box: Box) -> list[int]:
         return [round(c) for c in box]
@@ -107,6 +114,8 @@ def evaluate_image(image: Path, gts: list[tuple[Box, str]], min_iou: float) -> d
         "correct": sum(preds[i][1] == gts[j][1] for i, j, _ in matches),
         "iou_sum": sum(s for _, _, s in matches),
         "errors": errors,
+        # Per GT box: (tags, found, found with the right label).
+        "gt_outcomes": [(g[2], j in pred_of, j in pred_of and preds[pred_of[j]][1] == g[1]) for j, g in enumerate(gts)],
     }
 
 
@@ -137,9 +146,9 @@ def git_info() -> dict:
     return {"commit": run("rev-parse", "--short", "HEAD"), "dirty": bool(run("status", "--porcelain"))}
 
 
-def print_table(rows: list[tuple[str, dict]]) -> None:
+def print_table(rows: list[tuple[str, dict]], title: str = "image") -> None:
     header = (
-        f"{'image':<22}{'gt':>5}{'pred':>6}{'fp':>5}{'fn':>5}{'miscls':>8}"
+        f"{title:<22}{'gt':>5}{'pred':>6}{'fp':>5}{'fn':>5}{'miscls':>8}"
         f"{'prec':>8}{'recall':>8}{'f1':>8}{'cls_acc':>9}{'e2e':>8}{'iou':>7}"
     )
     print(header)
@@ -149,6 +158,41 @@ def print_table(rows: list[tuple[str, dict]]) -> None:
             f"{name:<22}{m['gt']:>5}{m['pred']:>6}{m['fp']:>5}{m['fn']:>5}{m['misclassified']:>8}"
             f"{m['precision']:>8.3f}{m['recall']:>8.3f}{m['f1']:>8.3f}{m['cls_accuracy']:>9.3f}"
             f"{m['e2e_accuracy']:>8.3f}{m['mean_iou']:>7.3f}"
+        )
+
+
+def group_metrics(results: list[dict], pattern: str) -> dict[str, dict]:
+    """Aggregate per-image counts by the first capture group of `pattern` in the image path."""
+    keys = ("gt", "pred", "tp", "correct", "iou_sum")
+    groups = defaultdict(list)
+    for r in results:
+        m = re.search(pattern, r["image"])
+        groups[m.group(1) if m else "(no match)"].append(r)
+    return {g: summarize(*(sum(r[k] for r in rs) for k in keys)) for g, rs in sorted(groups.items())}
+
+
+def tag_metrics(results: list[dict]) -> dict[str, dict]:
+    """Recall and end-to-end accuracy per GT tag (FPs have no tag)."""
+    counts = defaultdict(lambda: {"gt": 0, "found": 0, "correct": 0})
+    for r in results:
+        for tags, found, correct in r["gt_outcomes"]:
+            for t in tags:
+                c = counts[t]
+                c["gt"] += 1
+                c["found"] += found
+                c["correct"] += correct
+    return {
+        t: {**c, "recall": c["found"] / c["gt"], "e2e_accuracy": c["correct"] / c["gt"]}
+        for t, c in sorted(counts.items())
+    }
+
+
+def print_tags(tags: dict[str, dict]) -> None:
+    print(f"{'tag':<24}{'gt':>6}{'missed':>8}{'miscls':>8}{'recall':>8}{'e2e':>8}")
+    for t, c in tags.items():
+        print(
+            f"{t:<24}{c['gt']:>6}{c['gt'] - c['found']:>8}{c['found'] - c['correct']:>8}"
+            f"{c['recall']:>8.3f}{c['e2e_accuracy']:>8.3f}"
         )
 
 
@@ -177,6 +221,10 @@ def main() -> None:
     )
     parser.add_argument("--note", default="", help="Short description of the change being evaluated")
     parser.add_argument("--history", action="store_true", help="Print recorded runs and exit")
+    parser.add_argument(
+        "--group-by", metavar="REGEX", help="Print totals grouped by the first capture group in the image path"
+    )
+    parser.add_argument("--breakdown", action="store_true", help="Print recall per GT region tag")
     args = parser.parse_args()
 
     if args.history:
@@ -188,8 +236,17 @@ def main() -> None:
     per_image = {r["image"]: summarize(*(r[k] for k in keys)) for r in results}
     overall = summarize(*(sum(r[k] for r in results) for k in keys))
 
+    groups = group_metrics(results, args.group_by) if args.group_by else None
+    tags = tag_metrics(results) if args.breakdown else None
+
     print(f"IoU threshold: {args.iou}\n")
-    print_table([(Path(name).name, m) for name, m in per_image.items()] + [("OVERALL", overall)])
+    if groups:
+        print_table([*groups.items(), ("OVERALL", overall)], title="group")
+    else:
+        print_table([(Path(name).name, m) for name, m in per_image.items()] + [("OVERALL", overall)])
+    if tags:
+        print()
+        print_tags(tags)
 
     if args.errors:
         for r in results:
@@ -215,6 +272,11 @@ def main() -> None:
             "per_image": per_image,
             "errors": {r["image"]: r["errors"] for r in results if r["errors"]},
         }
+        if groups:
+            record["group_by"] = args.group_by
+            record["groups"] = groups
+        if tags:
+            record["tags"] = tags
         HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
         with HISTORY_PATH.open("a") as f:
             f.write(json.dumps(record) + "\n")
