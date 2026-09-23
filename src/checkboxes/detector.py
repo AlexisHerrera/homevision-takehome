@@ -1,12 +1,12 @@
 """Find checkboxes (solid-line squares) and classify them by the ink inside."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v3"
+MODEL_VERSION = "opencv-v4"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -27,6 +27,13 @@ class DetectorParams:
     min_border_coverage: float = 0.9
     # Ink fraction inside the box above which it's checked.
     checked_ink_ratio: float = 0.06
+    # Recovery passes: max size difference from the page's median box.
+    recover_size_tolerance: float = 0.15
+    # Recovery passes: darkness below the local paper level that counts as faint ink.
+    faint_ink_contrast: int = 30
+    # Recovery passes: longest line break to bridge, as a fraction of image width.
+    recover_gap_frac: float = 0.003
+    recover_min_fill: float = 0.7
 
 
 @dataclass(frozen=True)
@@ -49,10 +56,12 @@ class Detection:
 def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list[Detection]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     binary = binarize(gray)
+    boxes = find_boxes(binary, params)
+    boxes = sorted(boxes + recover_boxes(gray, binary, boxes, params), key=lambda b: (b[1], b[0]))
     h_lines, v_lines, _ = line_masks(binary, min_line_len(binary, params))
     lines = cv2.bitwise_or(h_lines, v_lines)
     detections = []
-    for box in find_boxes(binary, params):
+    for box in boxes:
         ratio = ink_ratio(binary, lines, box)
         detections.append(Detection(box=box, is_checked=ratio >= params.checked_ink_ratio, score=ratio))
     return detections
@@ -63,24 +72,37 @@ def binarize(gray: np.ndarray) -> np.ndarray:
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 15)
 
 
+def faint_ink(gray: np.ndarray, contrast: int) -> np.ndarray:
+    """Ink = 255 where darker than the nearby paper; unlike `binarize`, dark neighbors don't hide faint lines."""
+    k = max(int(gray.shape[1] * 0.004) | 1, 3)
+    paper = cv2.dilate(gray, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    return np.where(paper.astype(np.int16) - gray > contrast, 255, 0).astype(np.uint8)
+
+
 def min_line_len(binary: np.ndarray, params: DetectorParams) -> int:
     return max(int(binary.shape[1] * params.min_line_frac), 5)
 
 
-def line_masks(binary: np.ndarray, min_len: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def line_masks(binary: np.ndarray, min_len: int, close_gap: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Horizontal lines, vertical lines, and both merged and dilated to close small gaps."""
     h = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len, 1)))
     v = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len)))
-    lines = cv2.dilate(cv2.bitwise_or(h, v), cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    lines = cv2.bitwise_or(h, v)
+    if close_gap:
+        lines = cv2.bitwise_or(
+            cv2.morphologyEx(lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (close_gap, 1))),
+            cv2.morphologyEx(lines, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (1, close_gap))),
+        )
+    lines = cv2.dilate(lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
     return h, v, lines
 
 
-def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
+def find_boxes(binary: np.ndarray, params: DetectorParams, close_gap: int = 0) -> list[Rect]:
     img_w = binary.shape[1]
     min_side = int(img_w * params.min_side_frac)
     max_side = int(img_w * params.max_side_frac)
 
-    h_lines, v_lines, lines = line_masks(binary, min_line_len(binary, params))
+    h_lines, v_lines, lines = line_masks(binary, min_line_len(binary, params), close_gap)
     # Boxes are enclosed holes in the line mask.
     contours, _ = cv2.findContours(255 - lines, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -98,6 +120,37 @@ def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
         boxes.append((x, y, w, h))
     boxes = dedupe(boxes)
     return [b for b in boxes if not is_slot(b, boxes, lines, h_lines, v_lines)]
+
+
+def recover_boxes(gray: np.ndarray, binary: np.ndarray, found: list[Rect], params: DetectorParams) -> list[Rect]:
+    """Looser passes for damaged boxes (faint, broken corner, crossed by a stroke).
+
+    Each pass relaxes one step. A result is kept only if it is new and the size of the boxes already found,
+    since a form's checkboxes share one size; the strict results are never changed.
+    """
+    if len(found) < 3:
+        return []
+    med_w, med_h = np.median([b[2] for b in found]), np.median([b[3] for b in found])
+    tol = params.recover_size_tolerance
+    passes = [
+        find_boxes(cv2.bitwise_or(binary, faint_ink(gray, params.faint_ink_contrast)), params),
+        find_boxes(binary, params, close_gap=max(int(gray.shape[1] * params.recover_gap_frac), 5)),
+        find_boxes(binary, replace(params, min_fill=params.recover_min_fill)),
+    ]
+    added: list[Rect] = []
+    for box in (b for boxes in passes for b in boxes):
+        _, _, w, h = box
+        if abs(w - med_w) > tol * med_w or abs(h - med_h) > tol * med_h:
+            continue
+        if overlaps(box, found + added):
+            continue
+        added.append(box)
+    return added
+
+
+def overlaps(box: Rect, boxes: list[Rect]) -> bool:
+    x, y, w, h = box
+    return any(x < bx + bw and bx < x + w and y < by + bh and by < y + h for bx, by, bw, bh in boxes)
 
 
 def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float) -> bool:

@@ -63,3 +63,11 @@ def test_check_mark_overshooting_the_border_is_still_a_check() -> None:
     cv2.line(page, (310, 225), (318, 250), 0, 4)
     cv2.line(page, (318, 250), (352, 190), 0, 4)
     assert [d.is_checked for d in detect(page)] == [True]
+
+
+def test_recovers_box_with_broken_corner() -> None:
+    page = blank_page()
+    for x in (200, 400, 600, 800):
+        draw_box(page, x, 200)
+    cv2.rectangle(page, (796, 204), (804, 206), 255, -1)
+    assert [d.bbox[0] for d in detect(page)] == [pytest.approx(x, abs=5) for x in (200, 400, 600, 800)]
