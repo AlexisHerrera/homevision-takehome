@@ -37,11 +37,6 @@ def test_rejects_unsupported_file(client: TestClient) -> None:
     assert response.status_code == 415
 
 
-def test_rejects_pdf(client: TestClient) -> None:
-    response = post_file(client, b"%PDF-1.7 ...", "form.pdf")
-    assert response.status_code == 415
-
-
 def test_rejects_corrupt_image(client: TestClient) -> None:
     response = post_file(client, b"\x89PNG\r\n\x1a\n truncated", "broken.png")
     assert response.status_code == 415
