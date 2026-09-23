@@ -9,8 +9,8 @@
 Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004, 1004MC, 1004C) and classify each as `checked` / `unchecked`.
 
 - `src/checkboxes/detector.py` — OpenCV detector core: `detect(image) -> list[Detection]`, no I/O. Bump `MODEL_VERSION` when its logic or parameters change.
-- `src/checkboxes/documents.py` — decodes uploads (PDF via pypdfium2, images via OpenCV) into page images; enforces page/pixel limits.
-- `src/checkboxes/api/` — FastAPI app (`app.py` factory, `config.py` settings from `CHECKBOXES_*` env vars, `schemas.py`, `routes/`). `POST /detect` (multipart `file`) returns `{"boxes": [{"bbox": [x1, y1, x2, y2], "is_checked", "page"}]}`; `GET /health`.
+- `src/checkboxes/images.py` — decodes uploaded images (OpenCV) and enforces the pixel limit. PDFs are intentionally unsupported: the assignment's input is a document image.
+- `src/checkboxes/api/` — FastAPI app (`app.py` factory, `config.py` settings from `CHECKBOXES_*` env vars, `schemas.py`, `routes/`). `POST /detect` (multipart `file`) returns `{"boxes": [{"bbox": [x1, y1, x2, y2], "is_checked"}]}`; `GET /health`.
 - `scripts/detect_checkboxes.py` — CLI: writes Label Studio pre-annotations to `output/tasks.json`; `--debug output/debug` writes overlay images (green = checked, red = unchecked).
 - `data/labels.json` — hand-reviewed ground truth (Label Studio JSON export: detector pre-annotations corrected in the UI). Use it to evaluate the detector.
 - `scripts/evaluate.py` — scores the detector against `data/labels.json` (IoU ≥ 0.5 matching: precision/recall/F1, classification and end-to-end accuracy). `--errors` lists every error; `--record --note "..."` appends the run to `evaluations/history.jsonl`; `--history` prints past runs. Record with a clean working tree so the run is tied to a commit.
