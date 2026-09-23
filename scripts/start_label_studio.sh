@@ -5,4 +5,4 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
 export LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT="$ROOT"
-exec "$ROOT/.venv/bin/label-studio" "$@"
+exec uvx --python 3.12 --from "label-studio>=1.23" label-studio "$@"

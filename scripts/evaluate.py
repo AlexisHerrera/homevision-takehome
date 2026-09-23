@@ -1,39 +1,34 @@
-"""Evaluate the checkbox detector against the hand-reviewed ground truth.
-
-A prediction matches a ground-truth box when their IoU is >= --iou (greedy, highest IoU
-first). Reports detection metrics (precision / recall / F1), classification accuracy on
-matched boxes, and end-to-end accuracy (box found AND label right). With --record, appends
-the run to evaluations/history.jsonl so detector changes can be compared over time.
+"""Score the detector against the hand-reviewed labels (a match is IoU >= --iou).
 
 Usage:
-    python scripts/evaluate.py [--labels data/labels.json] [--iou 0.5] [--errors]
-    python scripts/evaluate.py --record --note "baseline"
-    python scripts/evaluate.py --history
+    uv run scripts/evaluate.py [--labels data/labels.json] [--iou 0.5] [--errors]
+    uv run scripts/evaluate.py --record --note "baseline"
+    uv run scripts/evaluate.py --history
 """
 
 import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
-import detect_checkboxes as detector
+import cv2
+
+from checkboxes import detector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HISTORY_PATH = REPO_ROOT / "evaluations" / "history.jsonl"
-# Detector module constants recorded with each run, so a result can be tied to its settings.
 PARAM_NAMES = ["MIN_SIDE_FRAC", "MAX_SIDE_FRAC", "MIN_ASPECT", "MAX_ASPECT", "MIN_LINE_FRAC", "CHECKED_INK_RATIO"]
 
 Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
 
 
 def load_ground_truth(labels_path: Path) -> dict[Path, list[tuple[Box, str]]]:
-    """Label Studio JSON export -> {image path: [(box, label), ...]} using the first annotation."""
+    """Label Studio export -> {image: [(box, label), ...]}, first annotation per task."""
     gt = {}
     for task in json.loads(labels_path.read_text()):
-        # e.g. "/data/local-files/?d=data/sample_1.png" -> repo-relative path
         image = REPO_ROOT / unquote(task["data"]["image"].split("?d=")[-1])
         annotations = [a for a in task["annotations"] if not a.get("was_cancelled")]
         if not annotations:
@@ -58,7 +53,7 @@ def iou(a: Box, b: Box) -> float:
 
 
 def match(preds: list[tuple[Box, str]], gts: list[tuple[Box, str]], min_iou: float) -> list[tuple[int, int, float]]:
-    """Greedy one-to-one matching, highest IoU first. Returns (pred_idx, gt_idx, iou)."""
+    """Greedy, highest IoU first. Returns (pred_idx, gt_idx, iou)."""
     pairs = sorted(
         ((iou(p[0], g[0]), i, j) for i, p in enumerate(preds) for j, g in enumerate(gts)),
         reverse=True,
@@ -76,8 +71,10 @@ def match(preds: list[tuple[Box, str]], gts: list[tuple[Box, str]], min_iou: flo
 
 
 def evaluate_image(image: Path, gts: list[tuple[Box, str]], min_iou: float) -> dict:
-    detections, _ = detector.detect(image)
-    preds = [((x, y, x + w, y + h), d["label"]) for d in detections for x, y, w, h in [d["box"]]]
+    img = cv2.imread(str(image))
+    if img is None:
+        raise ValueError(f"Could not read {image}")
+    preds = [(d.bbox, d.label) for d in detector.detect(img)]
     matches = match(preds, gts, min_iou)
     matched_p = {i for i, _, _ in matches}
     matched_g = {j for _, j, _ in matches}
@@ -86,12 +83,21 @@ def evaluate_image(image: Path, gts: list[tuple[Box, str]], min_iou: float) -> d
         return [round(c) for c in box]
 
     errors = (
-        [{"type": "false_positive", "bbox": fmt(preds[i][0]), "pred": preds[i][1]}
-         for i in range(len(preds)) if i not in matched_p]
-        + [{"type": "false_negative", "bbox": fmt(gts[j][0]), "gt": gts[j][1]}
-           for j in range(len(gts)) if j not in matched_g]
-        + [{"type": "misclassified", "bbox": fmt(gts[j][0]), "pred": preds[i][1], "gt": gts[j][1]}
-           for i, j, _ in matches if preds[i][1] != gts[j][1]]
+        [
+            {"type": "false_positive", "bbox": fmt(preds[i][0]), "pred": preds[i][1]}
+            for i in range(len(preds))
+            if i not in matched_p
+        ]
+        + [
+            {"type": "false_negative", "bbox": fmt(gts[j][0]), "gt": gts[j][1]}
+            for j in range(len(gts))
+            if j not in matched_g
+        ]
+        + [
+            {"type": "misclassified", "bbox": fmt(gts[j][0]), "pred": preds[i][1], "gt": gts[j][1]}
+            for i, j, _ in matches
+            if preds[i][1] != gts[j][1]
+        ]
     )
     return {
         "image": image.relative_to(REPO_ROOT).as_posix(),
@@ -118,7 +124,7 @@ def summarize(gt: int, pred: int, tp: int, correct: int, iou_sum: float) -> dict
         "recall": recall,
         "f1": 2 * precision * recall / (precision + recall) if precision + recall else 0.0,
         "cls_accuracy": correct / tp if tp else 0.0,
-        # Box found with the right label, out of all ground-truth boxes.
+        # Found with the right label, out of all GT boxes.
         "e2e_accuracy": correct / gt if gt else 0.0,
         "mean_iou": iou_sum / tp if tp else 0.0,
     }
@@ -132,7 +138,10 @@ def git_info() -> dict:
 
 
 def print_table(rows: list[tuple[str, dict]]) -> None:
-    header = f"{'image':<22}{'gt':>5}{'pred':>6}{'fp':>5}{'fn':>5}{'miscls':>8}{'prec':>8}{'recall':>8}{'f1':>8}{'cls_acc':>9}{'e2e':>8}{'iou':>7}"
+    header = (
+        f"{'image':<22}{'gt':>5}{'pred':>6}{'fp':>5}{'fn':>5}{'miscls':>8}"
+        f"{'prec':>8}{'recall':>8}{'f1':>8}{'cls_acc':>9}{'e2e':>8}{'iou':>7}"
+    )
     print(header)
     print("-" * len(header))
     for name, m in rows:
@@ -163,7 +172,9 @@ def main() -> None:
     parser.add_argument("--labels", type=Path, default=REPO_ROOT / "data" / "labels.json")
     parser.add_argument("--iou", type=float, default=0.5, help="Min IoU for a prediction to match a GT box")
     parser.add_argument("--errors", action="store_true", help="List every FP / FN / misclassified box")
-    parser.add_argument("--record", action="store_true", help=f"Append this run to {HISTORY_PATH.relative_to(REPO_ROOT)}")
+    parser.add_argument(
+        "--record", action="store_true", help=f"Append this run to {HISTORY_PATH.relative_to(REPO_ROOT)}"
+    )
     parser.add_argument("--note", default="", help="Short description of the change being evaluated")
     parser.add_argument("--history", action="store_true", help="Print recorded runs and exit")
     args = parser.parse_args()
@@ -188,10 +199,12 @@ def main() -> None:
     if args.record:
         git = git_info()
         if git["dirty"]:
-            print("\nWarning: working tree has uncommitted changes; the recorded commit won't reproduce this run.",
-                  file=sys.stderr)
+            print(
+                "\nWarning: working tree has uncommitted changes; the recorded commit won't reproduce this run.",
+                file=sys.stderr,
+            )
         record = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "git": git,
             "model_version": detector.MODEL_VERSION,
             "note": args.note,
