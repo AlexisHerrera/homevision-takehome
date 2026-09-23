@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v2"
+MODEL_VERSION = "opencv-v3"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -49,9 +49,11 @@ class Detection:
 def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list[Detection]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     binary = binarize(gray)
+    h_lines, v_lines, _ = line_masks(binary, min_line_len(binary, params))
+    lines = cv2.bitwise_or(h_lines, v_lines)
     detections = []
     for box in find_boxes(binary, params):
-        ratio = ink_ratio(binary, box)
+        ratio = ink_ratio(binary, lines, box)
         detections.append(Detection(box=box, is_checked=ratio >= params.checked_ink_ratio, score=ratio))
     return detections
 
@@ -59,6 +61,10 @@ def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list
 def binarize(gray: np.ndarray) -> np.ndarray:
     """Ink = 255. Adaptive, so shaded cells count as paper."""
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 15)
+
+
+def min_line_len(binary: np.ndarray, params: DetectorParams) -> int:
+    return max(int(binary.shape[1] * params.min_line_frac), 5)
 
 
 def line_masks(binary: np.ndarray, min_len: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -74,7 +80,7 @@ def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
     min_side = int(img_w * params.min_side_frac)
     max_side = int(img_w * params.max_side_frac)
 
-    h_lines, v_lines, lines = line_masks(binary, max(int(img_w * params.min_line_frac), 5))
+    h_lines, v_lines, lines = line_masks(binary, min_line_len(binary, params))
     # Boxes are enclosed holes in the line mask.
     contours, _ = cv2.findContours(255 - lines, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -179,8 +185,26 @@ def dedupe(boxes: list[Rect]) -> list[Rect]:
     return sorted(kept, key=lambda b: (b[1], b[0]))
 
 
-def ink_ratio(binary: np.ndarray, box: Rect) -> float:
+def ink_ratio(binary: np.ndarray, lines: np.ndarray, box: Rect) -> float:
+    """Ink fraction inside the box, ignoring strokes that run a box size or more outside it (e.g. a cross-out)."""
     x, y, w, h = box
+    H, W = binary.shape
+    m = max(w, h)
+    x0, y0, x1, y1 = max(x - m, 0), max(y - m, 0), min(x + w + m, W), min(y + h + m, H)
+    ink = binary[y0:y1, x0:x1] > 0
+    on_line = lines[y0:y1, x0:x1] > 0
+    strokes = ink & ~on_line
+    # Rejoin strokes cut where they crossed a line, bridging only through line pixels.
+    k = max(m // 4, 3)
+    grown = cv2.dilate(strokes.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))) > 0
+    joined = (strokes | (grown & on_line)).astype(np.uint8)
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(joined)
+    left, top, cw, ch = (stats[:, i] for i in range(4))
+    reaches_edge = (left == 0) | (top == 0) | (left + cw == x1 - x0) | (top + ch == y1 - y0)
+    reaches_edge[0] = False
+    ink &= ~(strokes & reaches_edge[labels])
+
     pad_x, pad_y = max(int(w * 0.15), 2), max(int(h * 0.15), 2)
-    inner = binary[y + pad_y : y + h - pad_y, x + pad_x : x + w - pad_x]
-    return float(inner.mean() / 255) if inner.size else 0.0
+    bx, by = x - x0, y - y0
+    inner = ink[by + pad_y : by + h - pad_y, bx + pad_x : bx + w - pad_x]
+    return float(inner.mean()) if inner.size else 0.0

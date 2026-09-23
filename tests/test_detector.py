@@ -47,3 +47,19 @@ def test_ignores_label_cell_between_adjacent_boxes() -> None:
     # The cell between the boxes is closed off by the table lines.
     cv2.putText(page, "Att.", (252, 232), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 0, 2)
     assert [d.bbox[0] for d in detect(page)] == [pytest.approx(200, abs=5), pytest.approx(300, abs=5)]
+
+
+def test_stroke_crossing_the_box_is_not_a_check() -> None:
+    page = blank_page()
+    draw_box(page, 300, 200)
+    draw_box(page, 600, 200, checked=True)
+    cv2.line(page, (200, 300), (420, 180), 0, 4)
+    assert [d.is_checked for d in detect(page)] == [False, True]
+
+
+def test_check_mark_overshooting_the_border_is_still_a_check() -> None:
+    page = blank_page()
+    draw_box(page, 300, 200)
+    cv2.line(page, (310, 225), (318, 250), 0, 4)
+    cv2.line(page, (318, 250), (352, 190), 0, 4)
+    assert [d.is_checked for d in detect(page)] == [True]
