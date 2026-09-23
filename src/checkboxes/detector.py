@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v1"
+MODEL_VERSION = "opencv-v2"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -61,11 +61,12 @@ def binarize(gray: np.ndarray) -> np.ndarray:
     return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 15)
 
 
-def line_mask(binary: np.ndarray, min_len: int) -> np.ndarray:
+def line_masks(binary: np.ndarray, min_len: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Horizontal lines, vertical lines, and both merged and dilated to close small gaps."""
     h = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (min_len, 1)))
     v = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_len)))
-    lines = cv2.bitwise_or(h, v)
-    return cv2.dilate(lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    lines = cv2.dilate(cv2.bitwise_or(h, v), cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    return h, v, lines
 
 
 def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
@@ -73,7 +74,7 @@ def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
     min_side = int(img_w * params.min_side_frac)
     max_side = int(img_w * params.max_side_frac)
 
-    lines = line_mask(binary, max(int(img_w * params.min_line_frac), 5))
+    h_lines, v_lines, lines = line_masks(binary, max(int(img_w * params.min_line_frac), 5))
     # Boxes are enclosed holes in the line mask.
     contours, _ = cv2.findContours(255 - lines, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -89,7 +90,8 @@ def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
         if not has_solid_border(lines, (x, y, w, h), params.min_border_coverage):
             continue
         boxes.append((x, y, w, h))
-    return dedupe(boxes)
+    boxes = dedupe(boxes)
+    return [b for b in boxes if not is_slot(b, boxes, lines, h_lines, v_lines)]
 
 
 def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float) -> bool:
@@ -104,6 +106,66 @@ def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float) -> bool:
         lines[y : y + h, x + w : min(x + w + t, W)].any(axis=1),
     ]
     return all(s.size and s.mean() >= min_coverage for s in strips)
+
+
+def is_slot(box: Rect, boxes: list[Rect], lines: np.ndarray, h_lines: np.ndarray, v_lines: np.ndarray) -> bool:
+    """A gap between two adjacent boxes, closed off by lines running past it (e.g. a label cell)."""
+    others = [b for b in boxes if b != box]
+    if (
+        any(shares_edge(lines, b, box) for b in others)
+        and any(shares_edge(lines, box, b) for b in others)
+        and runs_past(h_lines, box, -1)
+        and runs_past(h_lines, box, 1)
+    ):
+        return True
+    t_box, t_others = transpose(box), [transpose(b) for b in others]
+    return (
+        any(shares_edge(lines.T, b, t_box) for b in t_others)
+        and any(shares_edge(lines.T, t_box, b) for b in t_others)
+        and runs_past(v_lines.T, t_box, -1)
+        and runs_past(v_lines.T, t_box, 1)
+    )
+
+
+def transpose(box: Rect) -> Rect:
+    x, y, w, h = box
+    return y, x, h, w
+
+
+def shares_edge(lines: np.ndarray, left: Rect, right: Rect) -> bool:
+    """`right` sits just right of `left`, with only a line between them."""
+    lx, ly, lw, lh = left
+    rx, ry, rw, rh = right
+    if not 0 <= rx - (lx + lw) <= min(lw, rw) // 4:
+        return False
+    y0, y1 = max(ly, ry), min(ly + lh, ry + rh)
+    if y1 - y0 < min(lh, rh) / 2:
+        return False
+    return bool(lines[y0:y1, lx + lw : rx].all())
+
+
+def runs_past(h_lines: np.ndarray, box: Rect, step: int) -> bool:
+    """The edge above (step=-1) or below (+1) the box is a line continuing past both corners."""
+    x, y, w, h = box
+    H, W = h_lines.shape
+    margin = max(w // 3, 3)
+    if x - margin < 0 or x + w + margin > W:
+        return False
+
+    def is_edge(r: int) -> bool:
+        return 0 <= r < H and h_lines[r, x : x + w].mean() > 127
+
+    r = y - 1 if step < 0 else y + h
+    # The dilated mask puts the hole within 2 px of the edge.
+    for _ in range(3):
+        if is_edge(r):
+            break
+        r += step
+    while is_edge(r):
+        if h_lines[r, x - margin : x + w + margin].all():
+            return True
+        r += step
+    return False
 
 
 def dedupe(boxes: list[Rect]) -> list[Rect]:

@@ -17,7 +17,7 @@ def test_health(client: TestClient) -> None:
     assert response.json() == {"status": "ok", "model_version": MODEL_VERSION}
 
 
-@pytest.mark.parametrize(("name", "expected"), [("sample_1.png", 119), ("sample_2.jpg", 40)])
+@pytest.mark.parametrize(("name", "expected"), [("sample_1.png", 118), ("sample_2.jpg", 40)])
 def test_detect_image(client: TestClient, name: str, expected: int) -> None:
     response = post_file(client, (DATA_DIR / name).read_bytes(), name)
     assert response.status_code == 200

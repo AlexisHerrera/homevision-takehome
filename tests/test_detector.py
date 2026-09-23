@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from checkboxes.detector import detect
 
@@ -35,3 +36,14 @@ def test_accepts_color_images() -> None:
     page = blank_page()
     draw_box(page, 200, 200, checked=True)
     assert len(detect(cv2.cvtColor(page, cv2.COLOR_GRAY2BGR))) == 1
+
+
+def test_ignores_label_cell_between_adjacent_boxes() -> None:
+    page = blank_page()
+    for y in (195, 249):
+        cv2.line(page, (0, y), (WIDTH, y), 0, 3)
+    draw_box(page, 200, 199, side=46)
+    draw_box(page, 300, 199, side=46)
+    # The cell between the boxes is closed off by the table lines.
+    cv2.putText(page, "Att.", (252, 232), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 0, 2)
+    assert [d.bbox[0] for d in detect(page)] == [pytest.approx(200, abs=5), pytest.approx(300, abs=5)]
