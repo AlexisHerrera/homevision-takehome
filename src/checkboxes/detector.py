@@ -8,18 +8,25 @@ import numpy as np
 # Bump on any change to the logic or parameters.
 MODEL_VERSION = "opencv-v1"
 
-# Box side, as a fraction of image width.
-MIN_SIDE_FRAC = 0.008
-MAX_SIDE_FRAC = 0.025
-# Width / height; URAR 1004 boxes are slightly wide.
-MIN_ASPECT = 0.8
-MAX_ASPECT = 1.5
-# Min line length; drops text and X marks.
-MIN_LINE_FRAC = 0.007
-# Ink fraction inside the box above which it's checked.
-CHECKED_INK_RATIO = 0.06
-
 Rect = tuple[int, int, int, int]  # x, y, w, h
+
+
+@dataclass(frozen=True)
+class DetectorParams:
+    # Box side, as a fraction of image width.
+    min_side_frac: float = 0.008
+    max_side_frac: float = 0.025
+    # Width / height; URAR 1004 boxes are slightly wide.
+    min_aspect: float = 0.8
+    max_aspect: float = 1.5
+    # Min line length; drops text and X marks.
+    min_line_frac: float = 0.007
+    # Hole area / bounding-rect area.
+    min_fill: float = 0.85
+    # Fraction of each side that must be drawn.
+    min_border_coverage: float = 0.9
+    # Ink fraction inside the box above which it's checked.
+    checked_ink_ratio: float = 0.06
 
 
 @dataclass(frozen=True)
@@ -39,13 +46,13 @@ class Detection:
         return "checked" if self.is_checked else "unchecked"
 
 
-def detect(image: np.ndarray) -> list[Detection]:
+def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list[Detection]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     binary = binarize(gray)
     detections = []
-    for box in find_boxes(binary):
+    for box in find_boxes(binary, params):
         ratio = ink_ratio(binary, box)
-        detections.append(Detection(box=box, is_checked=ratio >= CHECKED_INK_RATIO, score=ratio))
+        detections.append(Detection(box=box, is_checked=ratio >= params.checked_ink_ratio, score=ratio))
     return detections
 
 
@@ -61,12 +68,12 @@ def line_mask(binary: np.ndarray, min_len: int) -> np.ndarray:
     return cv2.dilate(lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
 
 
-def find_boxes(binary: np.ndarray) -> list[Rect]:
+def find_boxes(binary: np.ndarray, params: DetectorParams) -> list[Rect]:
     img_w = binary.shape[1]
-    min_side = int(img_w * MIN_SIDE_FRAC)
-    max_side = int(img_w * MAX_SIDE_FRAC)
+    min_side = int(img_w * params.min_side_frac)
+    max_side = int(img_w * params.max_side_frac)
 
-    lines = line_mask(binary, max(int(img_w * MIN_LINE_FRAC), 5))
+    lines = line_mask(binary, max(int(img_w * params.min_line_frac), 5))
     # Boxes are enclosed holes in the line mask.
     contours, _ = cv2.findContours(255 - lines, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -75,17 +82,17 @@ def find_boxes(binary: np.ndarray) -> list[Rect]:
         x, y, w, h = cv2.boundingRect(c)
         if not (min_side <= w <= max_side and min_side <= h <= max_side):
             continue
-        if not MIN_ASPECT <= w / h <= MAX_ASPECT:
+        if not params.min_aspect <= w / h <= params.max_aspect:
             continue
-        if cv2.contourArea(c) / (w * h) < 0.85:
+        if cv2.contourArea(c) / (w * h) < params.min_fill:
             continue
-        if not has_solid_border(lines, (x, y, w, h)):
+        if not has_solid_border(lines, (x, y, w, h), params.min_border_coverage):
             continue
         boxes.append((x, y, w, h))
     return dedupe(boxes)
 
 
-def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float = 0.9) -> bool:
+def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float) -> bool:
     """Rejects holes without four drawn sides, e.g. inside letters like "n"."""
     x, y, w, h = box
     t = 4

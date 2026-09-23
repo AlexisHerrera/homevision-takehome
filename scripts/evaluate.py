@@ -10,6 +10,7 @@ import argparse
 import json
 import subprocess
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -20,7 +21,6 @@ from checkboxes import detector
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HISTORY_PATH = REPO_ROOT / "evaluations" / "history.jsonl"
-PARAM_NAMES = ["MIN_SIDE_FRAC", "MAX_SIDE_FRAC", "MIN_ASPECT", "MAX_ASPECT", "MIN_LINE_FRAC", "CHECKED_INK_RATIO"]
 
 Box = tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
 
@@ -210,7 +210,7 @@ def main() -> None:
             "note": args.note,
             "labels": args.labels.resolve().relative_to(REPO_ROOT).as_posix(),
             "iou_threshold": args.iou,
-            "params": {name: getattr(detector, name) for name in PARAM_NAMES},
+            "params": asdict(detector.DetectorParams()),
             "overall": overall,
             "per_image": per_image,
             "errors": {r["image"]: r["errors"] for r in results if r["errors"]},

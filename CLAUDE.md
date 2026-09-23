@@ -8,7 +8,7 @@
 
 Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004, 1004MC, 1004C) and classify each as `checked` / `unchecked`.
 
-- `src/checkboxes/detector.py` — OpenCV detector core: `detect(image) -> list[Detection]`, no I/O. Bump `MODEL_VERSION` when its logic or parameters change.
+- `src/checkboxes/detector.py` — OpenCV detector core: `detect(image, params=DetectorParams()) -> list[Detection]`, no I/O. Tunables live in the frozen `DetectorParams` dataclass. Bump `MODEL_VERSION` when its logic or parameters change.
 - `src/checkboxes/images.py` — decodes uploaded images (OpenCV) and enforces the pixel limit.
 - `src/checkboxes/api/` — FastAPI app (`app.py` factory, `config.py` settings from `CHECKBOXES_*` env vars, `schemas.py`, `routes/`). `POST /detect` (multipart `file`) returns `{"boxes": [{"bbox": [x1, y1, x2, y2], "is_checked"}]}`; `GET /health`.
 - `scripts/detect_checkboxes.py` — CLI: writes Label Studio pre-annotations to `output/tasks.json`; `--debug output/debug` writes overlay images (green = checked, red = unchecked).
