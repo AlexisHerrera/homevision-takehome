@@ -15,6 +15,8 @@ import cv2
 import numpy as np
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
+# Bump when the detection logic or parameters change; recorded by scripts/evaluate.py.
+MODEL_VERSION = "opencv-v1"
 
 # Checkbox side length, as a fraction of image width.
 MIN_SIDE_FRAC = 0.008
@@ -143,7 +145,7 @@ def to_ls_task(image_path: Path, url_prefix: str, detections: list[dict], width:
         })
     return {
         "data": {"image": f"{url_prefix}{image_path.as_posix()}"},
-        "predictions": [{"model_version": "opencv-v1", "result": result}],
+        "predictions": [{"model_version": MODEL_VERSION, "result": result}],
     }
 
 

@@ -10,6 +10,7 @@ Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004,
 
 - `scripts/detect_checkboxes.py` — OpenCV detector. Writes Label Studio pre-annotations to `output/tasks.json`; `--debug output/debug` writes overlay images (green = checked, red = unchecked).
 - `data/labels.json` — hand-reviewed ground truth (Label Studio JSON export: detector pre-annotations corrected in the UI). Use it to evaluate the detector.
+- `scripts/evaluate.py` — scores the detector against `data/labels.json` (IoU ≥ 0.5 matching: precision/recall/F1, classification and end-to-end accuracy). `--errors` lists every error; `--record --note "..."` appends the run to `evaluations/history.jsonl`; `--history` prints past runs. Bump `MODEL_VERSION` in the detector when its logic or parameters change.
 - `label_studio/labeling_config.xml` — Label Studio config (RectangleLabels `checked` / `unchecked`, `from_name="label"`, `to_name="image"`; must match the detector output).
 - `scripts/start_label_studio.sh` — starts Label Studio with local file serving rooted at the repo.
 
