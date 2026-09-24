@@ -1,6 +1,6 @@
 """Find checkboxes (solid-line squares) and classify them by the ink inside."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 
 import cv2
 import numpy as np
@@ -39,6 +39,16 @@ class DetectorParams:
     max_upscaled_pixels: int = 12_000_000
     # Boxes smaller than this fraction of the page's median box are dropped (glyph holes).
     min_size_ratio: float = 0.8
+
+
+def parse_params(spec: str) -> DetectorParams:
+    """ "key=value,..." overrides of the defaults, e.g. "min_side_frac=0.003,min_fill=0.75"."""
+    types = {f.name: f.type for f in fields(DetectorParams)}
+    overrides = {}
+    for item in spec.split(","):
+        key, value = item.split("=")
+        overrides[key] = (int if types[key] in (int, "int") else float)(value)
+    return replace(DetectorParams(), **overrides)
 
 
 @dataclass(frozen=True)

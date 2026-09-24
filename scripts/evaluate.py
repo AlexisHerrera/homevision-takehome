@@ -5,6 +5,10 @@ Usage:
     uv run scripts/evaluate.py --record --note "baseline"
     uv run scripts/evaluate.py --history
     uv run scripts/evaluate.py --labels data/holdout/synthetic.json --group-by '/([^/]+)/[^/]+$' --breakdown
+
+Try a parameter change without editing the detector (not recordable), optionally on a subset of images:
+    uv run scripts/evaluate.py --labels data/holdout/synthetic.json --images '/(lowres|scan)/' \
+        --params min_size_ratio=0.75 --breakdown
 """
 
 import argparse
@@ -76,11 +80,16 @@ def match(preds: list[tuple[Box, str]], gts: list[tuple[Box, str]], min_iou: flo
     return matches
 
 
-def evaluate_image(image: Path, gts: list[tuple[Box, str, list[str]]], min_iou: float) -> dict:
+def evaluate_image(
+    image: Path,
+    gts: list[tuple[Box, str, list[str]]],
+    min_iou: float,
+    params: detector.DetectorParams = detector.DetectorParams(),
+) -> dict:
     img = cv2.imread(str(image))
     if img is None:
         raise ValueError(f"Could not read {image}")
-    preds = [(d.bbox, d.label) for d in detector.detect(img)]
+    preds = [(d.bbox, d.label) for d in detector.detect(img, params)]
     matches = match(preds, gts, min_iou)
     matched_p = {i for i, _, _ in matches}
     matched_g = {j for _, j, _ in matches}
@@ -225,13 +234,22 @@ def main() -> None:
         "--group-by", metavar="REGEX", help="Print totals grouped by the first capture group in the image path"
     )
     parser.add_argument("--breakdown", action="store_true", help="Print recall per GT region tag")
+    parser.add_argument("--images", metavar="REGEX", help="Only evaluate images whose path matches")
+    parser.add_argument("--params", metavar="KEY=VALUE[,...]", help="DetectorParams overrides (experiments only)")
     args = parser.parse_args()
 
     if args.history:
         print_history()
         return
+    if args.record and (args.params or args.images):
+        parser.error("--record scores the committed detector on the whole label set; drop --params / --images")
 
-    results = [evaluate_image(img, boxes, args.iou) for img, boxes in load_ground_truth(args.labels).items()]
+    params = detector.parse_params(args.params) if args.params else detector.DetectorParams()
+    results = [
+        evaluate_image(img, boxes, args.iou, params)
+        for img, boxes in load_ground_truth(args.labels).items()
+        if not args.images or re.search(args.images, img.as_posix())
+    ]
     keys = ("gt", "pred", "tp", "correct", "iou_sum")
     per_image = {r["image"]: summarize(*(r[k] for k in keys)) for r in results}
     overall = summarize(*(sum(r[k] for r in results) for k in keys))

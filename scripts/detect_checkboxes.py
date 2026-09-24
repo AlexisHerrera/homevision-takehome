@@ -15,24 +15,14 @@ overrides and the detections are merged, e.g.
 
 import argparse
 import json
-from dataclasses import fields, replace
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from checkboxes.detector import MODEL_VERSION, Detection, DetectorParams, detect
+from checkboxes.detector import MODEL_VERSION, Detection, DetectorParams, detect, parse_params
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
-
-
-def parse_params(spec: str) -> DetectorParams:
-    types = {f.name: f.type for f in fields(DetectorParams)}
-    overrides = {}
-    for item in spec.split(","):
-        key, value = item.split("=")
-        overrides[key] = (int if types[key] in (int, "int") else float)(value)
-    return replace(DetectorParams(), **overrides)
 
 
 def overlaps(a: Detection, b: Detection) -> bool:
