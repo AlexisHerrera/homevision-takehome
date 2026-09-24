@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v5"
+MODEL_VERSION = "opencv-v6"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -39,6 +39,13 @@ class DetectorParams:
     max_upscaled_pixels: int = 12_000_000
     # Boxes smaller than this fraction of the page's median box are dropped (glyph holes).
     min_size_ratio: float = 0.8
+    # Pages with fewer boxes are retried with sizes this much smaller (forms with small boxes, e.g. checklists).
+    small_box_retry_below: int = 3
+    small_box_scale: float = 1.5
+    # Min ink depth at the hole's corners (diagonally) / at its sides; rounded glyph holes are ~0.5, boxes ~1.
+    # Only used by the small-box retry, whose shorter lines let bold letters through.
+    min_corner_ratio: float = 0.0
+    small_box_min_corner_ratio: float = 0.6
 
 
 def parse_params(spec: str) -> DetectorParams:
@@ -70,6 +77,30 @@ class Detection:
 
 def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list[Detection]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    detections = detect_gray(gray, params)
+    if len(detections) < params.small_box_retry_below and params.small_box_scale != 1:
+        small = detect_gray(gray, small_box_params(params))
+        if len(small) >= params.small_box_retry_below:
+            return small
+    return detections
+
+
+def small_box_params(params: DetectorParams) -> DetectorParams:
+    """Sizes and line lengths scaled down, and a larger upscale so the smaller boxes keep their pixel size."""
+    s = params.small_box_scale
+    return replace(
+        params,
+        min_side_frac=params.min_side_frac / s,
+        max_side_frac=params.max_side_frac / s,
+        min_line_frac=params.min_line_frac / s,
+        recover_gap_frac=params.recover_gap_frac / s,
+        min_width=round(params.min_width * s),
+        max_upscaled_pixels=round(params.max_upscaled_pixels * s * s),
+        min_corner_ratio=params.small_box_min_corner_ratio,
+    )
+
+
+def detect_gray(gray: np.ndarray, params: DetectorParams) -> list[Detection]:
     gray, scale = upscale(gray, params)
     binary = binarize(gray)
     boxes = find_boxes(binary, params)
@@ -148,6 +179,8 @@ def find_boxes(binary: np.ndarray, params: DetectorParams, close_gap: int = 0) -
             continue
         if not has_solid_border(lines, (x, y, w, h), params.min_border_coverage):
             continue
+        if params.min_corner_ratio and corner_ratio(binary, (x, y, w, h)) < params.min_corner_ratio:
+            continue
         boxes.append((x, y, w, h))
     boxes = dedupe(boxes)
     return [b for b in boxes if not is_slot(b, boxes, lines, h_lines, v_lines)]
@@ -204,6 +237,37 @@ def has_solid_border(lines: np.ndarray, box: Rect, min_coverage: float) -> bool:
         lines[y : y + h, x + w : min(x + w + t, W)].any(axis=1),
     ]
     return all(s.size and s.mean() >= min_coverage for s in strips)
+
+
+def corner_ratio(binary: np.ndarray, box: Rect) -> float:
+    """Ink depth going out diagonally from the hole's corners / going out from its sides (median of 4 each)."""
+    x, y, w, h = box
+    n = max(w, h)
+    corners = [(x - 1, y - 1, -1, -1), (x + w, y - 1, 1, -1), (x - 1, y + h, -1, 1), (x + w, y + h, 1, 1)]
+    sides = [
+        (x - 1, y + h // 2, -1, 0),
+        (x + w, y + h // 2, 1, 0),
+        (x + w // 2, y - 1, 0, -1),
+        (x + w // 2, y + h, 0, 1),
+    ]
+    diag = np.median([ink_run(binary, *ray, n) for ray in corners])
+    side = np.median([ink_run(binary, *ray, n) for ray in sides])
+    return float(diag / max(side, 1))
+
+
+def ink_run(binary: np.ndarray, x: int, y: int, dx: int, dy: int, n: int) -> int:
+    """Length of the first ink run along a ray, skipping the few paper pixels the dilated line mask leaves."""
+    H, W = binary.shape
+    steps = [(x + dx * i, y + dy * i) for i in range(n)]
+    ray = [binary[py, px] > 0 for px, py in steps if 0 <= px < W and 0 <= py < H]
+    i = 0
+    while i < min(len(ray), 4) and not ray[i]:
+        i += 1
+    run = 0
+    while i < len(ray) and ray[i]:
+        run += 1
+        i += 1
+    return run
 
 
 def is_slot(box: Rect, boxes: list[Rect], lines: np.ndarray, h_lines: np.ndarray, v_lines: np.ndarray) -> bool:
