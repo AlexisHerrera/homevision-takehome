@@ -5,18 +5,19 @@ them. Update it at the end of every session (status table, current numbers, the 
 explanation of each change lives in its commit message (`uv run scripts/evaluate.py --history`, then
 `git log <hash>`); the numbers of every recorded run live in `evaluations/history.jsonl`.
 
-Current detector: `opencv-v6` (commit `e8a26c6`). Next suggested: #5 (classifier) or #3 (marks crossing the border).
+Current detector: `opencv-v7` (commit `3935312`). Next suggested: #3 (marks crossing the border): it is now the
+largest source of missed checked boxes on real forms (Ocrolus) and of the remaining crossing-stroke errors.
 
 | # | Issue | Status | Main metric now |
 |---|---|---|---|
-| 1 | Resolution dependence | Mostly fixed in v5 | real 100 DPI e2e 0.975 (v4 0.000); synthetic scan 0.759 |
+| 1 | Resolution dependence | Mostly fixed in v5 | real 100 DPI e2e 0.975 (v4 0.000); synthetic scan 0.801 |
 | 2 | Size gate relative to page width | Mostly fixed in v6 | Plaza 0.965 (v5 0.000), MGIC 0.996 (v5 0.430) |
 | 3 | Marks touching/crossing the border | Open, improved by v5 | crossing_stroke recall 0.520, filled 0.864 |
 | 4 | Broken box edges | Open | broken_corner recall 0.037 |
-| 5 | Stray ink counted as a check | Open | erased_x e2e 0.589, crossing_stroke 0.270; 292 synthetic miscls |
-| 6 | Faint boxes | Open, improved by v5 | faint e2e 0.660; scan 0.224 |
+| 5 | Stray ink counted as a check | Mostly fixed in v7 | erased_x e2e 0.951 (v6 0.589), crossing_stroke 0.444; 75 synthetic miscls (v6 292) |
+| 6 | Faint boxes | Open, improved by v5 | faint e2e 0.704; scan 0.286 |
 | 7 | False positives: table/shaded cells, glyphs | Open, improved by v5 | 77 real FP, 60 of them on b3_1025_p02 |
-| 8 | Adjacent boxes / touching table lines | Open, improved by v5 | adjacent 0.803, table_line 0.875 |
+| 8 | Adjacent boxes / touching table lines | Open, improved by v5 | adjacent 0.818, table_line 0.910 |
 
 ## Session workflow
 
@@ -36,8 +37,9 @@ Current detector: `opencv-v6` (commit `e8a26c6`). Next suggested: #5 (classifier
 3. Pick one issue. Explore with `--errors`, `--images REGEX` (subset) and `--params key=value,...` (try parameter
    values without editing the detector), e.g.
    `uv run scripts/evaluate.py --labels data/holdout/synthetic.json --images '/scan/' --params min_width=0`.
-4. Guardrail: `tests/test_samples.py` fails on any missed/extra box on the 4 samples, or a misclassification beyond
-   the known one (sample_2's erased X). If a fix corrects that one, set `KNOWN_MISCLASSIFIED` to `{}`.
+4. Guardrail: `tests/test_samples.py` fails on any missed/extra box or misclassification on the 4 samples
+   (`KNOWN_MISCLASSIFIED` is empty since v7). `tests/test_detector.py` has synthetic cases (e.g. a check whose
+   vertex is below the box) that encode intended behavior; don't loosen them to make a change pass.
 5. Check the whole held-out set, not just the targeted slice: every group and tag should be equal or better, or the
    regression explained. Then check a fresh synthetic seed so the fix doesn't just fit seed 0:
    ```sh
@@ -65,24 +67,25 @@ Rules of thumb: fix one problem per session; prefer changes that only add to wha
 recovery passes' pattern) so the samples can only regress through new false positives; the design set is
 optimistic because the rules were designed on it.
 
-## Current numbers (opencv-v6)
+## Current numbers (opencv-v7)
 
 e2e = found with the right label / all GT boxes.
 
-| Set | GT | Precision | Recall | Cls acc | e2e | v5 e2e |
+| Set | GT | Precision | Recall | Cls acc | e2e | v6 e2e |
 |---|---|---|---|---|---|---|
-| data/labels.json (design) | 288 | 1.000 | 1.000 | 0.997 | 0.997 | 0.997 |
-| real 300 DPI | 1831 | 0.992 | 0.995 | 1.000 | 0.995 | 0.841 |
-| real 200 DPI | 1831 | 0.990 | 0.995 | 1.000 | 0.995 | 0.841 |
-| real 150 DPI | 1831 | 0.989 | 0.992 | 1.000 | 0.992 | 0.837 |
-| real 100 DPI | 1831 | 0.987 | 0.975 | 1.000 | 0.975 | 0.824 |
-| synthetic seed 0 (all) | 5760 | 0.989 | 0.890 | 0.943 | 0.839 | 0.839 |
+| data/labels.json (design) | 288 | 1.000 | 1.000 | 1.000 | 1.000 | 0.997 |
+| real 300 DPI | 1831 | 0.992 | 0.995 | 1.000 | 0.995 | 0.995 |
+| real 200 DPI | 1831 | 0.990 | 0.995 | 1.000 | 0.995 | 0.995 |
+| real 150 DPI | 1831 | 0.989 | 0.992 | 1.000 | 0.992 | 0.992 |
+| real 100 DPI | 1831 | 0.987 | 0.975 | 1.000 | 0.975 | 0.975 |
+| synthetic seed 0 (all) | 5760 | 0.989 | 0.890 | 0.985 | 0.877 | 0.839 |
+| synthetic seed 1 (all, fresh) | 6643 | 0.981 | 0.878 | 0.985 | 0.865 | 0.831 |
 
 Real by source (all DPIs): blank forms b1-b8 recall 1.000 (b3 60 FP, b2 6, b8 4); RealVals (f1) 0.947;
 MGIC (f2) 0.996; Plaza (f3) 0.965; Ocrolus (f4) 0.964.
 
-Synthetic by profile: clean 0.890, jpeg 0.878, lighting 0.862, noise 0.863, rotate 0.854, lowres 0.835,
-blur 0.798, scan 0.759.
+Synthetic by profile: clean 0.921, jpeg 0.910, lighting 0.910, noise 0.913, rotate 0.890, lowres 0.877,
+blur 0.825, scan 0.801.
 
 ---
 
@@ -94,8 +97,8 @@ v5 upscales images narrower than 2550 px (capped at 12 MP) and drops boxes under
 Remaining:
 - 100 DPI mean IoU 0.874 (vs 1.000 at 300 DPI): the hole mapped back from the upscaled image is not the one the GT
   was drawn from. Matches still pass IoU 0.5 comfortably.
-- `scan` (0.759) and `blur` (0.798) still trail `clean` (0.890). Their weak tags are faint (#6), offcenter
-  (scan 0.559, blur 0.588) and crossing strokes (#3/#5).
+- `scan` (0.801) and `blur` (0.825) still trail `clean` (0.921). Their weak tags are faint (#6), offcenter
+  (scan 0.542, blur 0.588) and crossing strokes (#3/#5).
 - 100 DPI pages now cost as much as 300 DPI pages.
 
 Lessons: text height is a worse scale proxy than page width here (box/text height 0.59-2.5, box/page width
@@ -156,36 +159,45 @@ bridge gaps proportional to the expected box side; the border-template matching 
 
 Watch: table cells and brackets that look like three-sided boxes (#7).
 
-## 5. Stray ink inside the box counted as a check (misclassification)
+## 5. Stray ink inside the box counted as a check (misclassification) — mostly fixed in v7
 
-Wrong calls: 292 synthetic (v4: 244; v5 finds more hard boxes and misclassifies them). Also sample_2's one
-remaining design-set error (erased X at `[197, 614, 218, 635]`).
+v7 treats line pixels inside the box as strokes, so the in-box piece of a crossing stroke is removed with the rest
+of it, and calls a box checked if its core (25% margin) has ink, or the inner area (15% margin) has enough ink
+outside pieces confined to one corner (erased marks leave their ends in the corners). Details, rejected
+alternatives and numbers: `git log 3935312`.
 
-- `mark:erased_x` (whited-out X leaving corner remains): 158 called checked (e2e 0.589).
-- `mark:crossing_stroke` (stroke through the box, labeled unchecked): 95 called checked (e2e 0.270).
-- `mark:overshoot`: 30 checked called unchecked.
-- Repro (still wrong in v5): `synthetic/clean/clean_003_b5_1075_p06.png` box `[1319, 3426, 1347, 3454]` (erased X);
-  `clean_001_b7_1004mc_p01.png` `[2266, 1000, 2295, 1029]` (crossing stroke).
+Wrong calls now: 75 synthetic seed 0 (v6 292), 87 seed 1 (v6 317); design set 0 (sample_2's erased X fixed).
 
-Cause: classification is an ink ratio inside the box (`checked_ink_ratio` 0.06). v3 ignores strokes that cross the
-box, but only those it recognises as lines; wavy hand strokes and corner remains still count.
+- `mark:crossing_stroke`: 29 called checked (e2e 0.444, v6 0.270). The part of the stroke outside the box is
+  straight enough to be a line, so the chain to the window edge breaks (outside the box, line pixels are not
+  strokes). Making short line pieces outside the box strokes fixes most of these but links X arms to nearby text
+  (overshoot 48 -> 110+ on the dev seeds).
+- `mark:overshoot`: 34 checked called unchecked (v6 30). The arms run into nearby text or rules and the whole mark
+  is linked to the window edge and removed. Mostly in noisy/low-res profiles, where the binary is busy.
+- `scan` has 31 of the 75 wrong calls.
+- Thin margin on real data: an Ocrolus software check crossing the left border of a split hole (#3) scores 0.122
+  against the 0.1 core threshold at 300 DPI; `core_margin` 0.3 broke it.
+- Repro: the v6 repros (`clean_003_b5_1075_p06.png` erased X, `clean_001_b7_1004mc_p01.png` crossing stroke) are
+  fixed. The only wrong calls left on `clean` are `clean_009_b5_1075_p02.png` `[1437, 2057, 1465, 2086]` (erased
+  X on a faint box, called checked) and `clean_012_b5_1075_p01.png` `[2033, 2461, 2061, 2489]` (overshooting X on a
+  broken corner, called unchecked); the crossing-stroke errors are in the degraded profiles.
 
-Techniques to try:
-- Features beyond the ink ratio: ink near the center vs corners (erased-X remains sit in the corners), strokes that
-  stay inside vs continue outside, ink darkness from the gray image (erased marks are lighter), blob count.
-  Start with a logistic regression on these.
+Techniques to try next:
+- Tell a stroke's straight outer pieces from form lines by length on the whole page (form lines run far past the
+  window; stroke pieces are ~1 box side) instead of treating every line pixel outside the box as a form line.
+- For overshoot: follow a stroke out of the box only while it keeps its direction, instead of any connection to
+  the window edge.
 - A small CNN on box crops (~48x48 with half a box of margin), trained with PyTorch in a dev dependency group and
   exported to ONNX; run with `cv2.dnn.readNetFromONNX` so production still only needs opencv. Later it can become
-  3-class (not a box / unchecked / checked) and filter looser candidates (#2, #7).
-- Data hygiene: train on synthetic seeds other than 0, never on `real.json`; the synthetic templates are the same
-  blank forms as the real `b*` sources, so split by form type to avoid learning layouts.
+  3-class (not a box / unchecked / checked) and filter looser candidates (#2, #7). Train on synthetic seeds other
+  than 0 and 1, never on `real.json`; split by form type to avoid learning layouts.
 
 Watch: small and off-center checks must stay checked; the real set has no handwriting (171 checked boxes, all
 printed), so real classification accuracy says little.
 
 ## 6. Faint or gray boxes next to dark content
 
-Boxes affected: 107 missed and 17 misclassified of 365 (`cond:faint`, e2e 0.660); scan 0.224, blur 0.542, lowres 0.660, clean 0.789.
+Boxes affected: 107 missed and 1 misclassified of 365 (`cond:faint`, e2e 0.704); scan 0.286, blur 0.562, lowres 0.720, clean 0.789.
 
 - Repro (still missed in v5): `synthetic/clean/clean_004_b2_1004c_p04.png` box `[1291, 3340, 1319, 3368]`.
 - Cause: the adaptive threshold (block 31, C 15) drops the light border when a dark block is inside the window; the
@@ -212,8 +224,8 @@ Watch: `cond:table_line` and `cond:adjacent` (#8) must not get worse.
 
 ## 8. Adjacent boxes and boxes touching table lines (minor)
 
-`cond:adjacent` e2e 0.803 (v4 0.750), `cond:table_line` 0.875 (v4 0.830; 22 missed, 14 misclassified). Weakest in
-blur (adjacent 0.600). The touching line merges into the border and changes the hole shape or adds ink inside.
+`cond:adjacent` e2e 0.818 (v4 0.750), `cond:table_line` 0.910 (v4 0.830; 22 missed, 4 misclassified). Weakest in
+blur (adjacent 0.700). The touching line merges into the border and changes the hole shape or adds ink inside.
 Re-check after #3.
 
 ---
