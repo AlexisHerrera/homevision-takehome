@@ -5,9 +5,9 @@ them. Update it at the end of every session (status table, current numbers, the 
 explanation of each change lives in its commit message (`uv run scripts/evaluate.py --history`, then
 `git log <hash>`); the numbers of every recorded run live in `evaluations/history.jsonl`.
 
-Current detector: `opencv-v8` (commit `dcfcedd`). Next suggested: #5 (crossing strokes called checked): v8 now
-finds 91% of the crossing-stroke boxes, but calls 81 of them (seed 0) checked; they are the largest error left on
-the synthetic set.
+Current detector: `opencv-v9` (commit `953d2d2`). Next suggested: #5 (crossing strokes called checked): v8 found
+91% of the crossing-stroke boxes, but calls 81 of them (seed 0) checked; they are the largest error left on the
+synthetic set.
 
 | # | Issue | Status | Main metric now |
 |---|---|---|---|
@@ -17,7 +17,7 @@ the synthetic set.
 | 4 | Broken box edges | Half fixed in v8 | broken_corner recall 0.549 (v7 0.037) |
 | 5 | Stray ink counted as a check | Open again: v8 finds boxes v7 missed | crossing_stroke e2e 0.696 with 81 miscls; 130 synthetic miscls (v7 75) |
 | 6 | Faint boxes | Open, improved by v5 | faint e2e 0.704; scan 0.286 |
-| 7 | False positives: table/shaded cells, glyphs | Open, improved by v5 | 78 real FP, 60 of them on b3_1025_p02 |
+| 7 | False positives: table/shaded cells, glyphs | Table cells fixed in v9 | 10 real FP (v8 78), all box-sized |
 | 8 | Adjacent boxes / touching table lines | Open, improved by v5/v8 | adjacent 0.879, table_line 0.948 |
 
 ## Session workflow
@@ -71,27 +71,30 @@ Rules of thumb: fix one problem per session; prefer changes that only add to wha
 recovery passes' pattern) so the samples can only regress through new false positives; the design set is
 optimistic because the rules were designed on it.
 
-## Current numbers (opencv-v8)
+## Current numbers (opencv-v9)
 
 e2e = found with the right label / all GT boxes.
 
-| Set | GT | Precision | Recall | Cls acc | e2e | v7 e2e |
-|---|---|---|---|---|---|---|
-| data/labels.json (design) | 288 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-| real 300 DPI | 1831 | 0.992 | 0.995 | 1.000 | 0.995 | 0.995 |
-| real 200 DPI | 1831 | 0.990 | 0.995 | 1.000 | 0.995 | 0.995 |
-| real 150 DPI | 1831 | 0.989 | 0.993 | 1.000 | 0.993 | 0.992 |
-| real 100 DPI | 1831 | 0.987 | 0.984 | 1.000 | 0.984 | 0.975 |
-| synthetic seed 0 (all) | 5760 | 0.989 | 0.952 | 0.976 | 0.929 | 0.877 |
-| synthetic seed 1 (all, fresh) | 6643 | 0.982 | 0.948 | 0.976 | 0.925 | 0.865 |
+v9 only removed false positives: recall, classification and e2e are identical to v8 on every set, group and tag.
 
-Real by source (all DPIs): blank forms b1-b8 recall 1.000 (b3 60 FP, b2 6, b8 5); RealVals (f1) 0.967;
+| Set | GT | Precision (v8) | Recall | Cls acc | e2e | FP (v8) |
+|---|---|---|---|---|---|---|
+| data/labels.json (design) | 288 | 1.000 (1.000) | 1.000 | 1.000 | 1.000 | 0 (0) |
+| real 300 DPI | 1831 | 1.000 (0.992) | 0.995 | 1.000 | 0.995 | 0 (15) |
+| real 200 DPI | 1831 | 0.998 (0.990) | 0.995 | 1.000 | 0.995 | 4 (19) |
+| real 150 DPI | 1831 | 0.998 (0.989) | 0.993 | 1.000 | 0.993 | 3 (20) |
+| real 100 DPI | 1831 | 0.998 (0.987) | 0.984 | 1.000 | 0.984 | 3 (24) |
+| synthetic seed 0 (all) | 5760 | 0.999 (0.989) | 0.952 | 0.976 | 0.929 | 7 (61) |
+| synthetic seed 1 (all, fresh) | 6643 | 0.999 (0.982) | 0.948 | 0.976 | 0.925 | 9 (114) |
+
+Real by source (all DPIs): blank forms b1-b8 recall 1.000 (b2 6 FP, b8 1); RealVals (f1) 0.967 (3 FP);
 MGIC (f2) 0.996; Plaza (f3) 0.967; Ocrolus (f4) 0.972.
 
 Synthetic by profile: clean 0.959, jpeg 0.951, lighting 0.948, noise 0.948, rotate 0.936, lowres 0.922,
 blur 0.898, scan 0.890.
 
-Runtime: the real set (240 pages) takes ~44 s (v7 ~28 s); the v8 border matching adds ~65 ms per 10 MP page.
+Runtime: the real set (240 pages) takes ~44-46 s (v7 ~28 s; v9 adds nothing measurable); the v8 border matching
+adds ~65 ms per 10 MP page.
 
 ---
 
@@ -222,18 +225,27 @@ Techniques to try: background division or CLAHE before binarizing; Sauvola thres
 candidates; checking border contrast against the local paper level only; the border-template matching from #3.
 A binarization change affects every image: check sample_2 (JPEG) carefully.
 
-## 7. False positives: table grid cells, shaded cells, glyphs
+## 7. False positives: table grid cells, shaded cells, glyphs — table cells fixed in v9
 
-Real: 78 FP (v4 217). By page (all DPIs): `b3_1025_p02` 60, `f1_realvals_1004_p04` 5, `b8_2055_legacy_p01` 5,
-`b2_1004c_p01`/`p03` 6 (sidebar letters at low DPI), `f1_realvals_1004_p05` 2. Synthetic 56.
+v9 drops boxes over 1.35x the page's median box side (`max_size_ratio`), the mirror of v5's glyph-hole gate. The
+table-cell FPs were 1.44-2.2x the page's boxes; no GT box in any set is over 1.24x its page's median. Real FP 78 ->
+10, synthetic seed 0 61 -> 7, seed 1 114 -> 9, no GT box lost. Details: `git log 953d2d2`.
 
-- Repro: `data/holdout/real/300/b3_1025_p02.png`: the "Tot / Br / Ba" header cells (called checked because of the
-  text) and the empty "Unit # 4" row cells; `b8_2055_legacy_p01.png`: a gray shaded cell next to "Predominant". (The Plaza sidebar "D" FP is gone
-  in v6: `corner_ratio` on the small-box retry rejects it.)
-- Cause: a small square cell of a table is geometrically a checkbox. Nothing checks context.
+Remaining (real, all DPIs): `b2_1004c_p01`/`p03` 6 (sidebar letters at low DPI), `f1_realvals_1004_p04` 3 (100
+and 200 DPI, between the black sidebar and the checked "I [X] did" box, called checked; not investigated),
+`b8_2055_legacy_p01` 1 (the 200 DPI glyph rectangle between thick rules, see #3).
 
-Techniques to try: reject candidates that share edges with neighbours (part of a grid); require white margin on at
-least one side; reject cells whose border lines continue past the corners; `corner_ratio` (v6, only on the small-box retry now) on every pass; the learned verifier from #5.
+- Repro: `data/holdout/real/100/b2_1004c_p01.png` `[40, 1780, 50, 1793]`; `real/200/b8_2055_legacy_p01.png`
+  `[483, 1425, 507, 1448]`.
+- Cause: these are box-sized, so the size gates can't help; nothing checks context.
+
+Techniques to try: `corner_ratio` (v6, only on the small-box retry now) on every pass; require white margin on at
+least one side; reject cells sharing edges with neighbours / whose border lines run past the corners (table cells of
+checkbox size); the learned verifier from #5.
+
+Lessons: `max_size_ratio` 1.25 loses Ocrolus boxes (1.24x the median; that form mixes box sizes slightly), 1.5
+keeps the b8 shaded cell (1.44x). The gate assumes one checkbox size per page, like `min_size_ratio`: a form with
+a second, larger box size would lose those boxes (none in the sets).
 
 Watch: `cond:table_line` and `cond:adjacent` (#8) must not get worse.
 
