@@ -90,3 +90,13 @@ def test_ignores_white_letter_in_black_sidebar() -> None:
     cv2.rectangle(page, (20, 0), (60, 599), 0, -1)
     cv2.rectangle(page, (31, 208), (49, 230), 255, 4)
     assert [d.bbox[0] for d in detect(page)] == [pytest.approx(x, abs=5) for x in (400, 600, 800)]
+
+
+def test_ignores_table_cell_larger_than_the_page_boxes() -> None:
+    page = blank_page()
+    for x in (200, 400, 600):
+        draw_box(page, x, 200)
+    # A header cell with text: geometrically a box, twice the checkbox size.
+    cv2.rectangle(page, (900, 190), (962, 242), 0, 3)
+    cv2.putText(page, "Tot", (908, 228), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 0, 2)
+    assert [d.bbox[0] for d in detect(page)] == [pytest.approx(x, abs=5) for x in (200, 400, 600)]

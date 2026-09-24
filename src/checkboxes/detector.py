@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v8"
+MODEL_VERSION = "opencv-v9"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -43,8 +43,9 @@ class DetectorParams:
     # Narrower images are upscaled to this width first; the pixel constants assume ~25+ px boxes.
     min_width: int = 2550
     max_upscaled_pixels: int = 12_000_000
-    # Boxes smaller than this fraction of the page's median box are dropped (glyph holes).
+    # Boxes smaller / larger than these fractions of the page's median box are dropped (glyph holes / table cells).
     min_size_ratio: float = 0.8
+    max_size_ratio: float = 1.35
     # Pages with fewer boxes are retried with sizes this much smaller (forms with small boxes, e.g. checklists).
     small_box_retry_below: int = 3
     small_box_scale: float = 1.5
@@ -117,7 +118,7 @@ def detect_gray(gray: np.ndarray, params: DetectorParams) -> list[Detection]:
     binary = binarize(gray)
     boxes = find_boxes(binary, params)
     boxes = sorted(boxes + recover_boxes(gray, binary, boxes, params), key=lambda b: (b[1], b[0]))
-    boxes = drop_small(boxes, params.min_size_ratio)
+    boxes = drop_off_size(boxes, params.min_size_ratio, params.max_size_ratio)
     h_lines, v_lines, _ = line_masks(binary, min_line_len(binary, params))
     lines = cv2.bitwise_or(h_lines, v_lines)
     detections = []
@@ -328,12 +329,13 @@ def border_run(profile: np.ndarray) -> tuple[int, int] | None:
     return (start, i) if i > start else None
 
 
-def drop_small(boxes: list[Rect], min_ratio: float) -> list[Rect]:
-    """A form's checkboxes share one size; much smaller holes are letters, e.g. white-on-black sidebar text."""
+def drop_off_size(boxes: list[Rect], min_ratio: float, max_ratio: float) -> list[Rect]:
+    """A form's checkboxes share one size; much smaller holes are letters (e.g. white-on-black sidebar text),
+    much larger ones table cells."""
     if len(boxes) < 3:
         return boxes
     med = np.median([max(b[2], b[3]) for b in boxes])
-    return [b for b in boxes if max(b[2], b[3]) >= min_ratio * med]
+    return [b for b in boxes if min_ratio * med <= max(b[2], b[3]) <= max_ratio * med]
 
 
 def overlaps(box: Rect, boxes: list[Rect]) -> bool:
