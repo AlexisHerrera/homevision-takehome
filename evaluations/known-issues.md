@@ -5,17 +5,17 @@ them. Update it at the end of every session (status table, current numbers, the 
 explanation of each change lives in its commit message (`uv run scripts/evaluate.py --history`, then
 `git log <hash>`); the numbers of every recorded run live in `evaluations/history.jsonl`.
 
-Current detector: `opencv-v5` (commit `5743f11`). Next suggested: #2 (size gate) or #5 (classifier).
+Current detector: `opencv-v6` (commit `e8a26c6`). Next suggested: #5 (classifier) or #3 (marks crossing the border).
 
 | # | Issue | Status | Main metric now |
 |---|---|---|---|
-| 1 | Resolution dependence | Mostly fixed in v5 | real 100 DPI e2e 0.824 (v4 0.000); synthetic scan 0.759 |
-| 2 | Size gate relative to page width | Open | Plaza 0.000, MGIC 0.430 |
+| 1 | Resolution dependence | Mostly fixed in v5 | real 100 DPI e2e 0.975 (v4 0.000); synthetic scan 0.759 |
+| 2 | Size gate relative to page width | Mostly fixed in v6 | Plaza 0.965 (v5 0.000), MGIC 0.996 (v5 0.430) |
 | 3 | Marks touching/crossing the border | Open, improved by v5 | crossing_stroke recall 0.520, filled 0.864 |
 | 4 | Broken box edges | Open | broken_corner recall 0.037 |
 | 5 | Stray ink counted as a check | Open | erased_x e2e 0.589, crossing_stroke 0.270; 292 synthetic miscls |
 | 6 | Faint boxes | Open, improved by v5 | faint e2e 0.660; scan 0.224 |
-| 7 | False positives: table/shaded cells, glyphs | Open, improved by v5 | 79 real FP, 60 of them on b3_1025_p02 |
+| 7 | False positives: table/shaded cells, glyphs | Open, improved by v5 | 77 real FP, 60 of them on b3_1025_p02 |
 | 8 | Adjacent boxes / touching table lines | Open, improved by v5 | adjacent 0.803, table_line 0.875 |
 
 ## Session workflow
@@ -65,21 +65,21 @@ Rules of thumb: fix one problem per session; prefer changes that only add to wha
 recovery passes' pattern) so the samples can only regress through new false positives; the design set is
 optimistic because the rules were designed on it.
 
-## Current numbers (opencv-v5)
+## Current numbers (opencv-v6)
 
 e2e = found with the right label / all GT boxes.
 
-| Set | GT | Precision | Recall | Cls acc | e2e | v4 e2e |
+| Set | GT | Precision | Recall | Cls acc | e2e | v5 e2e |
 |---|---|---|---|---|---|---|
 | data/labels.json (design) | 288 | 1.000 | 1.000 | 0.997 | 0.997 | 0.997 |
-| real 300 DPI | 1831 | 0.990 | 0.841 | 1.000 | 0.841 | 0.841 |
-| real 200 DPI | 1831 | 0.988 | 0.841 | 1.000 | 0.841 | 0.837 |
-| real 150 DPI | 1831 | 0.987 | 0.837 | 1.000 | 0.837 | 0.790 |
-| real 100 DPI | 1831 | 0.984 | 0.824 | 1.000 | 0.824 | 0.000 |
-| synthetic seed 0 (all) | 5760 | 0.989 | 0.890 | 0.943 | 0.839 | 0.794 |
+| real 300 DPI | 1831 | 0.992 | 0.995 | 1.000 | 0.995 | 0.841 |
+| real 200 DPI | 1831 | 0.990 | 0.995 | 1.000 | 0.995 | 0.841 |
+| real 150 DPI | 1831 | 0.989 | 0.992 | 1.000 | 0.992 | 0.837 |
+| real 100 DPI | 1831 | 0.987 | 0.975 | 1.000 | 0.975 | 0.824 |
+| synthetic seed 0 (all) | 5760 | 0.989 | 0.890 | 0.943 | 0.839 | 0.839 |
 
 Real by source (all DPIs): blank forms b1-b8 recall 1.000 (b3 60 FP, b2 6, b8 4); RealVals (f1) 0.947;
-MGIC (f2) 0.430; Plaza (f3) 0.000; Ocrolus (f4) 0.964.
+MGIC (f2) 0.996; Plaza (f3) 0.965; Ocrolus (f4) 0.964.
 
 Synthetic by profile: clean 0.890, jpeg 0.878, lighting 0.862, noise 0.863, rotate 0.854, lowres 0.835,
 blur 0.798, scan 0.759.
@@ -102,29 +102,26 @@ Lessons: text height is a worse scale proxy than page width here (box/text heigh
 0.0063-0.016). Features around a hole (outer-ring ink, per-side paper, border thickness) do not separate glyph
 holes from real boxes at 100 DPI; page-level size consistency does.
 
-## 2. Size gate is a fixed fraction of page width: embedded or scaled forms missed
+## 2. Size gate relative to page width — mostly fixed in v6
 
-Boxes affected: ~1,150 (Plaza 150 + MGIC checklist 138, at each DPI). Unchanged by v5.
+The size gate (`min_side_frac`, `max_side_frac`, `min_line_frac`) is a fraction of page width. Plaza (median box
+side / page width 0.0075) and the MGIC checklist pp. 26-28 (0.0076) fall under `min_side_frac` 0.008; GSE forms are
+0.011. v6 retries pages where the normal pass finds < 3 boxes with the fractions / 1.5 and a 1.5x larger upscale,
+and filters rounded glyph holes on that retry with `corner_ratio`. Details and rejected alternatives:
+`git log e8a26c6`.
 
-- Real: Plaza e2e 0.000 at every DPI; MGIC 0.430 (the 138 checklist boxes on pp. 26-28 missed).
-- Median box side / page width: GSE forms 0.011, RealVals 0.0125, Plaza 0.0075, MGIC 0.0076; `min_side_frac` is
-  0.008. The samples span 0.0098 (sample_4) to 0.020 (sample_1, near `max_side_frac` 0.025).
-- Repro: `data/holdout/real/300/f3_plaza_p10.png`, `f2_mgic_p27.png`. The pre-annotation override
-  `min_side_frac=0.003` (plus looser fill/border) finds them; see `scripts/detect_checkboxes.py` docstring.
-  Quick experiment: `--images 'f[23]_' --params min_side_frac=0.003`.
+Remaining:
+- Only pages with < 3 boxes are retried. A page mixing normal and small boxes, or with 1-2 small boxes, still misses
+  the small ones. Boxes under 0.0053 of page width or over `max_side_frac` (0.025) are still missed; the real set
+  has neither.
+- Misses: `f3_plaza_p24` 4 boxes per DPI, `f2_mgic_p28` 1 per DPI, `f3_plaza_p11` 3 small tall boxes at 100 DPI
+  (corner ratio under 0.6).
+- Text-only pages now run the detector twice (the retry at up to 27 MP): the real set takes ~29 s instead of ~21 s.
 
-Cause: `min_side_frac` / `max_side_frac` / `min_line_frac` are relative to page width, which assumes the form fills
-the page.
-
-Techniques to try:
-- Wide candidate size range, then keep the dominant size cluster(s) on the page. Supporting data: 98% of GT boxes
-  are within 0.94-1.12 of their page's median (min 0.42, 4 outliers on Plaza/MGIC pages). v5's `drop_small` and
-  v4's recovery already use the page median.
-- Tie line length to the candidate's own size, not page width.
-
-Watch: letters "o", "c", "D" and sidebar glyphs become candidates at small sizes; precision on text-heavy pages
-(blank pp. 4-5 of each form have zero boxes: any detection there is an FP). With a wide size range the median can
-be dominated by glyphs on pages with few boxes.
+Lessons: these forms fill the page (ink spans 0.88-0.92 of the width) and just use small boxes, so there is no
+"form scale" to estimate from the page. Hole aspect, hole corner fill and border thickness don't separate glyph
+holes from real boxes at 100 DPI; the ink depth along the corner diagonals vs the sides does (boxes ~1, glyphs
+<= 0.53).
 
 ## 3. Marks touching or crossing the border break the "enclosed square" test
 
@@ -200,16 +197,16 @@ A binarization change affects every image: check sample_2 (JPEG) carefully.
 
 ## 7. False positives: table grid cells, shaded cells, glyphs
 
-Real: 79 FP (v4 217). By page (all DPIs): `b3_1025_p02` 60, `f1_realvals_1004_p04` 5, `b8_2055_legacy_p01` 4,
-`b2_1004c_p01`/`p03` 6 (sidebar letters at low DPI), `f3_plaza_p09` 2, `f1_realvals_1004_p05` 2. Synthetic 56.
+Real: 77 FP (v4 217). By page (all DPIs): `b3_1025_p02` 60, `f1_realvals_1004_p04` 5, `b8_2055_legacy_p01` 4,
+`b2_1004c_p01`/`p03` 6 (sidebar letters at low DPI), `f1_realvals_1004_p05` 2. Synthetic 56.
 
 - Repro: `data/holdout/real/300/b3_1025_p02.png`: the "Tot / Br / Ba" header cells (called checked because of the
-  text) and the empty "Unit # 4" row cells; `b8_2055_legacy_p01.png`: a gray shaded cell next to "Predominant";
-  `f3_plaza_p09.png`: black sidebar letter "D" (same size as the boxes, so v5's `drop_small` keeps it).
+  text) and the empty "Unit # 4" row cells; `b8_2055_legacy_p01.png`: a gray shaded cell next to "Predominant". (The Plaza sidebar "D" FP is gone
+  in v6: `corner_ratio` on the small-box retry rejects it.)
 - Cause: a small square cell of a table is geometrically a checkbox. Nothing checks context.
 
 Techniques to try: reject candidates that share edges with neighbours (part of a grid); require white margin on at
-least one side; reject cells whose border lines continue past the corners; the learned verifier from #5.
+least one side; reject cells whose border lines continue past the corners; `corner_ratio` (v6, only on the small-box retry now) on every pass; the learned verifier from #5.
 
 Watch: `cond:table_line` and `cond:adjacent` (#8) must not get worse.
 
