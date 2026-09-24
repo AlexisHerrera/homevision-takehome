@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v7"
+MODEL_VERSION = "opencv-v8"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -52,6 +52,12 @@ class DetectorParams:
     # Only used by the small-box retry, whose shorter lines let bold letters through.
     min_corner_ratio: float = 0.0
     small_box_min_corner_ratio: float = 0.6
+    # Border matching recovery: min ink on the page's box border template, max ink in the bands just inside and
+    # just outside it (width a fraction of the side).
+    border_min_ring: float = 0.9
+    border_max_inner: float = 0.4
+    border_max_outer: float = 0.8
+    border_inner_band: float = 0.08
 
 
 def parse_params(spec: str) -> DetectorParams:
@@ -209,6 +215,7 @@ def recover_boxes(gray: np.ndarray, binary: np.ndarray, found: list[Rect], param
         find_boxes(cv2.bitwise_or(binary, faint_ink(gray, params.faint_ink_contrast)), params),
         find_boxes(binary, params, close_gap=max(int(gray.shape[1] * params.recover_gap_frac), 5)),
         find_boxes(binary, replace(params, min_fill=params.recover_min_fill)),
+        match_border(gray, binary, found, params),
     ]
     added: list[Rect] = []
     for box in (b for boxes in passes for b in boxes):
@@ -219,6 +226,106 @@ def recover_boxes(gray: np.ndarray, binary: np.ndarray, found: list[Rect], param
             continue
         added.append(box)
     return added
+
+
+def match_border(gray: np.ndarray, binary: np.ndarray, found: list[Rect], params: DetectorParams) -> list[Rect]:
+    """Boxes whose border matches the page's median box border, whatever ink is inside or crosses it.
+
+    Strokes crossing a box pass the line filter and split its hole; the border itself stays intact.
+    """
+    med_w, med_h = (int(np.median([b[i] for b in found])) for i in (2, 3))
+    pad = max(med_w, med_h) // 2
+    crops = []
+    H, W = binary.shape
+    tol = params.recover_size_tolerance
+    for x, y, w, h in found:
+        if abs(w - med_w) > tol * med_w or abs(h - med_h) > tol * med_h:
+            continue
+        cx, cy = x + w // 2, y + h // 2
+        x0, y0 = cx - med_w // 2 - pad, cy - med_h // 2 - pad
+        if x0 < 0 or y0 < 0 or x0 + med_w + 2 * pad > W or y0 + med_h + 2 * pad > H:
+            continue
+        crops.append(binary[y0 : y0 + med_h + 2 * pad, x0 : x0 + med_w + 2 * pad] > 0)
+    if len(crops) < 3:
+        return []
+    mean = np.mean(crops, axis=0)
+    # Border ink per side as (first, last + 1) distance out from the hole, along the middle of each side; the
+    # dilated line mask leaves a pixel or two of paper between the hole and the ink.
+    my, mx = pad + med_h // 2, pad + med_w // 2
+    sides = [
+        border_run(mean[my, pad - 1 :: -1]),
+        border_run(mean[pad - 1 :: -1, mx]),
+        border_run(mean[my, pad + med_w :]),
+        border_run(mean[pad + med_h :, mx]),
+    ]
+    if not all(sides):
+        return []
+    (s_l, e_l), (s_t, e_t), (s_r, e_r), (s_b, e_b) = sides
+    band = max(2, round(min(med_w, med_h) * params.border_inner_band))
+    # Ink fractions in frames around hole positions, from an integral image. The adaptive threshold hollows out
+    # large black areas; their inside is still no box interior.
+    ink = ((binary > 0) | (gray < 128)).astype(np.uint8)
+    margin = max(e_l, e_t, e_r, e_b) + band
+    ii = cv2.integral(cv2.copyMakeBorder(ink, margin, margin, margin, margin, cv2.BORDER_CONSTANT, value=0))
+    ny, nx = H - med_h + 1, W - med_w + 1  # hole positions inside the image
+
+    def ink_in(rects: list[tuple[int, int, int, int]], ys: np.ndarray | None = None, xs=None) -> np.ndarray:
+        """Ink fraction in rects (x0, y0, x1, y1, relative to the hole), at every position or at (ys, xs)."""
+        total, area = 0, 0
+        for x0, y0, x1, y1 in rects:
+            x0, y0, x1, y1 = x0 + margin, y0 + margin, x1 + margin, y1 + margin
+            if ys is None:
+                total = total + (
+                    ii[y1 : y1 + ny, x1 : x1 + nx]
+                    - ii[y0 : y0 + ny, x1 : x1 + nx]
+                    - ii[y1 : y1 + ny, x0 : x0 + nx]
+                    + ii[y0 : y0 + ny, x0 : x0 + nx]
+                )
+            else:
+                total = (
+                    total + ii[ys + y1, xs + x1] - ii[ys + y0, xs + x1] - ii[ys + y1, xs + x0] + ii[ys + y0, xs + x0]
+                )
+            area += (x1 - x0) * (y1 - y0)
+        return total / area
+
+    def frame(d0: tuple[int, int, int, int], d1: tuple[int, int, int, int]) -> list[tuple[int, int, int, int]]:
+        """The four sides, without corners, of the band between d0 and d1 (per side distance out of the hole)."""
+        (l0, t0, r0, b0), (l1, t1, r1, b1) = d0, d1
+        w, h = med_w, med_h
+        return [(-l1, 0, -l0, h), (w + r0, 0, w + r1, h), (0, -t1, w, -t0), (0, h + b0, w, h + b1)]
+
+    border, gap = (e_l, e_t, e_r, e_b), (s_l, s_t, s_r, s_b)
+    ring = ink_in(frame(gap, border))
+    ys, xs = np.nonzero(ring >= params.border_min_ring)
+    inner = ink_in(frame((-band,) * 4, (0,) * 4), ys, xs)
+    # Just outside the border; solid ink there is a dark background, e.g. around white-on-black letters.
+    outer = ink_in(frame(border, tuple(e + band for e in border)), ys, xs)
+    ok = (inner <= params.border_max_inner) & (outer <= params.border_max_outer)
+    ys, xs = ys[ok], xs[ok]
+    score = np.zeros((ny, nx), np.float32)
+    score[ys, xs] = ring[ys, xs] - inner[ok]
+    # Local maxima, best first, one per box-sized neighborhood.
+    peaks = score == cv2.dilate(score, cv2.getStructuringElement(cv2.MORPH_RECT, (med_w, med_h)))
+    keep = peaks[ys, xs]
+    ys, xs = ys[keep], xs[keep]
+    boxes: list[Rect] = []
+    for i in np.argsort(-score[ys, xs]):
+        box = (int(xs[i]), int(ys[i]), med_w, med_h)
+        if not overlaps(box, boxes):
+            boxes.append(box)
+    return boxes
+
+
+def border_run(profile: np.ndarray) -> tuple[int, int] | None:
+    """(start, end) of the consistent ink run near the start of `profile`, or None."""
+    ink = profile >= 0.75
+    i = 0
+    while i < min(len(ink), 3) and not ink[i]:
+        i += 1
+    start = i
+    while i < len(ink) and ink[i]:
+        i += 1
+    return (start, i) if i > start else None
 
 
 def drop_small(boxes: list[Rect], min_ratio: float) -> list[Rect]:
