@@ -13,7 +13,7 @@ provider "aws" {
 
 locals {
   name        = "homevision-checkboxes"
-  github_repo = "AlexisHerrera/homevision-takehome"
+  github_repo = "AlexisHerrera@52416190/homevision-takehome@1382118718"
 }
 
 data "aws_caller_identity" "current" {}

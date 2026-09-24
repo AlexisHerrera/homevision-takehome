@@ -24,7 +24,7 @@ Layout: `backend/` (Python project: detector, API, evaluation tooling, data), `f
 - `backend/Dockerfile` — production image of the API (uv multi-stage, non-root, port 8000). The same image runs on Lambda via the Lambda Web Adapter extension (inert outside Lambda).
 - `compose.yaml` (repo root) — `docker compose up --build` runs the API (:8000) and the frontend behind nginx (:8080, `/api` proxied like CloudFront; `frontend/Dockerfile`, `frontend/nginx.conf`).
 - `frontend/` — React + TypeScript (Vite) UI calling `/api/*`; `npm run dev` proxies `/api` to `localhost:8000`. Samples are copied from `backend/data/` at dev/build time.
-- `infra/` — Terraform. `infra/bootstrap/` (local state, applied once): state bucket, ECR, GitHub OIDC deploy role. `infra/`: Lambda (arm64, `CHECKBOXES_ROOT_PATH=/api`), API Gateway HTTP API (throttled), S3 + CloudFront, $20 budget + kill switch. Region `us-west-2`, account pinned with `allowed_account_ids`; always use `AWS_PROFILE=homevision`.
+- `infra/` — Terraform. `infra/bootstrap/` (local state, applied once): state bucket, ECR, GitHub OIDC deploy role. `infra/`: Lambda (arm64, `CHECKBOXES_ROOT_PATH=/api`), API Gateway HTTP API (throttled), S3 + CloudFront, kill switch (throttle to 0) triggered by a CloudWatch invocations alarm or the $20 budget. Region `us-west-2`, account pinned with `allowed_account_ids`; always use `AWS_PROFILE=homevision`.
 - `.github/workflows/ci.yml` — lint/test/frontend/terraform checks; on `main` also deploys (OIDC role). `scripts/deploy.sh` (repo root) does the same deploy by hand.
 
 ## Environment

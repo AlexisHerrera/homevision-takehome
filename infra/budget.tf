@@ -8,7 +8,7 @@ resource "aws_sns_topic_policy" "budget" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "budgets.amazonaws.com" }
+      Principal = { Service = ["budgets.amazonaws.com", "cloudwatch.amazonaws.com"] }
       Action    = "SNS:Publish"
       Resource  = aws_sns_topic.budget.arn
     }]
@@ -102,4 +102,19 @@ resource "aws_sns_topic_subscription" "kill_switch" {
   topic_arn = aws_sns_topic.budget.arn
   protocol  = "lambda"
   endpoint  = aws_lambda_function.kill_switch.arn
+}
+
+resource "aws_cloudwatch_metric_alarm" "invocations" {
+  alarm_name          = "${local.name}-invocations"
+  alarm_description   = "Traffic spike: trips the kill switch within minutes, before billing data catches up"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Invocations"
+  dimensions          = { FunctionName = aws_lambda_function.api.function_name }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 500
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.budget.arn]
 }

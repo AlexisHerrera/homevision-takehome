@@ -66,9 +66,9 @@ browser ──> CloudFront ──/*──────> S3 (frontend)
 
 - The API runs on Lambda from the same Docker image, through the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter); it scales to zero, so idle cost is ~$0.
 - Frontend and API share the CloudFront domain, so there is no CORS.
-- Limits: 4 MB uploads (Lambda's 6 MB payload limit, base64-encoded), 25 MP images, 30 s timeout, 2 requests/s (burst 5).
+- Limits: 4 MB uploads (Lambda's 6 MB payload limit, base64-encoded), 25 MP images, 30 s timeout. API Gateway throttles at 2 requests/s (burst 5), though it enforces this approximately; the account's Lambda concurrency limit (10) is the hard ceiling.
 - Uploaded images are only held in memory; logs are kept 7 days.
-- A $20 monthly budget emails alerts at $5 (actual), $15 (forecast) and $20; at $20 a kill switch sets the API throttle to 0 (every request gets 429) until the next `terraform apply`.
+- Cost guard: a kill switch sets the API throttle to 0 (every request gets 429) until the next `terraform apply`. It fires on 500+ invocations in 5 minutes (a CloudWatch alarm, reacts in minutes) or when the $20 monthly budget is reached (billing data lags hours). The budget also emails at $5 (actual) and $15 (forecast).
 
 Infrastructure is Terraform in `infra/`:
 

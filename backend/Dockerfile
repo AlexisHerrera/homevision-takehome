@@ -18,7 +18,7 @@ COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 /lambda-adapter /opt
 RUN useradd --create-home --uid 1000 app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 \
-    AWS_LWA_PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/health
+    AWS_LWA_PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/health AWS_LWA_ASYNC_INIT=true
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "checkboxes.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
