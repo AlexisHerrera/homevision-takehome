@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v6"
+MODEL_VERSION = "opencv-v7"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -25,8 +25,14 @@ class DetectorParams:
     min_fill: float = 0.85
     # Fraction of each side that must be drawn.
     min_border_coverage: float = 0.9
-    # Ink fraction inside the box above which it's checked.
-    checked_ink_ratio: float = 0.06
+    # Checked if the ink fraction in the box's core (inside core_margin, a fraction of the side) reaches
+    # checked_core_ratio, or the fraction inside ink_margin reaches checked_ink_ratio without counting ink pieces
+    # that fit in one corner_zone (erased marks leave their ends in the corners).
+    checked_core_ratio: float = 0.1
+    core_margin: float = 0.25
+    checked_ink_ratio: float = 0.12
+    ink_margin: float = 0.15
+    corner_zone: float = 0.4
     # Recovery passes: max size difference from the page's median box.
     recover_size_tolerance: float = 0.15
     # Recovery passes: darkness below the local paper level that counts as faint ink.
@@ -110,8 +116,11 @@ def detect_gray(gray: np.ndarray, params: DetectorParams) -> list[Detection]:
     lines = cv2.bitwise_or(h_lines, v_lines)
     detections = []
     for box in boxes:
-        ratio = ink_ratio(binary, lines, box)
-        detections.append(Detection(box=unscale(box, scale), is_checked=ratio >= params.checked_ink_ratio, score=ratio))
+        ink = mark_ink(binary, lines, box)
+        core = ink_ratio(ink, params.core_margin)
+        spread = ink_ratio(drop_corner_pieces(ink, params.corner_zone), params.ink_margin)
+        is_checked = core >= params.checked_core_ratio or spread >= params.checked_ink_ratio
+        detections.append(Detection(box=unscale(box, scale), is_checked=is_checked, score=max(core, spread)))
     return detections
 
 
@@ -341,14 +350,17 @@ def dedupe(boxes: list[Rect]) -> list[Rect]:
     return sorted(kept, key=lambda b: (b[1], b[0]))
 
 
-def ink_ratio(binary: np.ndarray, lines: np.ndarray, box: Rect) -> float:
-    """Ink fraction inside the box, ignoring strokes that run a box size or more outside it (e.g. a cross-out)."""
+def mark_ink(binary: np.ndarray, lines: np.ndarray, box: Rect) -> np.ndarray:
+    """Ink inside the box, without strokes that run a box size or more outside it (e.g. a cross-out)."""
     x, y, w, h = box
     H, W = binary.shape
     m = max(w, h)
     x0, y0, x1, y1 = max(x - m, 0), max(y - m, 0), min(x + w + m, W), min(y + h + m, H)
     ink = binary[y0:y1, x0:x1] > 0
     on_line = lines[y0:y1, x0:x1] > 0
+    bx, by = x - x0, y - y0
+    # Straight bits of a stroke pass as lines; inside the box they can only be marks.
+    on_line[by : by + h, bx : bx + w] = False
     strokes = ink & ~on_line
     # Rejoin strokes cut where they crossed a line, bridging only through line pixels.
     k = max(m // 4, 3)
@@ -359,8 +371,22 @@ def ink_ratio(binary: np.ndarray, lines: np.ndarray, box: Rect) -> float:
     reaches_edge = (left == 0) | (top == 0) | (left + cw == x1 - x0) | (top + ch == y1 - y0)
     reaches_edge[0] = False
     ink &= ~(strokes & reaches_edge[labels])
+    return ink[by : by + h, bx : bx + w]
 
-    pad_x, pad_y = max(int(w * 0.15), 2), max(int(h * 0.15), 2)
-    bx, by = x - x0, y - y0
-    inner = ink[by + pad_y : by + h - pad_y, bx + pad_x : bx + w - pad_x]
+
+def drop_corner_pieces(ink: np.ndarray, zone: float) -> np.ndarray:
+    h, w = ink.shape
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8))
+    left, top, cw, ch = (stats[:, i] for i in range(4))
+    in_x = (left + cw <= w * zone) | (left >= w * (1 - zone))
+    in_y = (top + ch <= h * zone) | (top >= h * (1 - zone))
+    corner = in_x & in_y
+    corner[0] = False
+    return ink & ~corner[labels]
+
+
+def ink_ratio(ink: np.ndarray, margin: float) -> float:
+    h, w = ink.shape
+    pad_x, pad_y = max(int(w * margin), 2), max(int(h * margin), 2)
+    inner = ink[pad_y : h - pad_y, pad_x : w - pad_x]
     return float(inner.mean()) if inner.size else 0.0

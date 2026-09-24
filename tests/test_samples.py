@@ -12,8 +12,7 @@ evaluate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(evaluate)
 
 GROUND_TRUTH = evaluate.load_ground_truth(DATA_DIR / "labels.json")
-# sample_2: the erased X at [197, 614, 218, 635] is called checked.
-KNOWN_MISCLASSIFIED = {"sample_2.jpg": 1}
+KNOWN_MISCLASSIFIED: dict[str, int] = {}
 
 
 @pytest.mark.parametrize("image", sorted(GROUND_TRUTH), ids=lambda p: p.name)
