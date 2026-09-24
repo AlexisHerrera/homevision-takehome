@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 # Bump on any change to the logic or parameters.
-MODEL_VERSION = "opencv-v4"
+MODEL_VERSION = "opencv-v5"
 
 Rect = tuple[int, int, int, int]  # x, y, w, h
 
@@ -34,6 +34,11 @@ class DetectorParams:
     # Recovery passes: longest line break to bridge, as a fraction of image width.
     recover_gap_frac: float = 0.003
     recover_min_fill: float = 0.7
+    # Narrower images are upscaled to this width first; the pixel constants assume ~25+ px boxes.
+    min_width: int = 2550
+    max_upscaled_pixels: int = 12_000_000
+    # Boxes smaller than this fraction of the page's median box are dropped (glyph holes).
+    min_size_ratio: float = 0.8
 
 
 @dataclass(frozen=True)
@@ -55,16 +60,32 @@ class Detection:
 
 def detect(image: np.ndarray, params: DetectorParams = DetectorParams()) -> list[Detection]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    gray, scale = upscale(gray, params)
     binary = binarize(gray)
     boxes = find_boxes(binary, params)
     boxes = sorted(boxes + recover_boxes(gray, binary, boxes, params), key=lambda b: (b[1], b[0]))
+    boxes = drop_small(boxes, params.min_size_ratio)
     h_lines, v_lines, _ = line_masks(binary, min_line_len(binary, params))
     lines = cv2.bitwise_or(h_lines, v_lines)
     detections = []
     for box in boxes:
         ratio = ink_ratio(binary, lines, box)
-        detections.append(Detection(box=box, is_checked=ratio >= params.checked_ink_ratio, score=ratio))
+        detections.append(Detection(box=unscale(box, scale), is_checked=ratio >= params.checked_ink_ratio, score=ratio))
     return detections
+
+
+def upscale(gray: np.ndarray, params: DetectorParams) -> tuple[np.ndarray, float]:
+    h, w = gray.shape
+    scale = min(params.min_width / w, (params.max_upscaled_pixels / (w * h)) ** 0.5)
+    if scale <= 1:
+        return gray, 1.0
+    return cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC), scale
+
+
+def unscale(box: Rect, scale: float) -> Rect:
+    x, y, w, h = box
+    x1, y1 = round(x / scale), round(y / scale)
+    return x1, y1, round((x + w) / scale) - x1, round((y + h) / scale) - y1
 
 
 def binarize(gray: np.ndarray) -> np.ndarray:
@@ -146,6 +167,14 @@ def recover_boxes(gray: np.ndarray, binary: np.ndarray, found: list[Rect], param
             continue
         added.append(box)
     return added
+
+
+def drop_small(boxes: list[Rect], min_ratio: float) -> list[Rect]:
+    """A form's checkboxes share one size; much smaller holes are letters, e.g. white-on-black sidebar text."""
+    if len(boxes) < 3:
+        return boxes
+    med = np.median([max(b[2], b[3]) for b in boxes])
+    return [b for b in boxes if max(b[2], b[3]) >= min_ratio * med]
 
 
 def overlaps(box: Rect, boxes: list[Rect]) -> bool:

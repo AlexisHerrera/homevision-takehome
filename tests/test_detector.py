@@ -71,3 +71,22 @@ def test_recovers_box_with_broken_corner() -> None:
         draw_box(page, x, 200)
     cv2.rectangle(page, (796, 204), (804, 206), 255, -1)
     assert [d.bbox[0] for d in detect(page)] == [pytest.approx(x, abs=5) for x in (200, 400, 600, 800)]
+
+
+def test_detects_boxes_on_low_resolution_page() -> None:
+    page = blank_page()
+    for x in (200, 400, 600, 800):
+        draw_box(page, x, 200, checked=x == 200)
+    small = cv2.resize(page, None, fx=1 / 3, fy=1 / 3, interpolation=cv2.INTER_AREA)  # 100 DPI, ~13 px boxes
+    detections = detect(small)
+    assert [d.is_checked for d in detections] == [True, False, False, False]
+    assert [d.bbox[0] for d in detections] == [pytest.approx(x / 3, abs=2) for x in (200, 400, 600, 800)]
+
+
+def test_ignores_white_letter_in_black_sidebar() -> None:
+    page = blank_page()
+    for x in (400, 600, 800):
+        draw_box(page, x, 200)
+    cv2.rectangle(page, (20, 0), (60, 599), 0, -1)
+    cv2.rectangle(page, (31, 208), (49, 230), 255, 4)
+    assert [d.bbox[0] for d in detect(page)] == [pytest.approx(x, abs=5) for x in (400, 600, 800)]
