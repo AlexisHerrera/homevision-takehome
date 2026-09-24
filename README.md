@@ -48,6 +48,7 @@ Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
+git config core.hooksPath .githooks   # pre-commit hook: ruff format check, ruff check, pytest
 uv run uvicorn checkboxes.api.app:app --reload
 uv run ruff format . && uv run ruff check . && uv run pytest
 ```

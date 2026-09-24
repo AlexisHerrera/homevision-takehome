@@ -24,6 +24,6 @@ Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004,
 ## Environment
 
 - Managed with uv (Python 3.12, `.python-version`). `uv sync` creates `.venv/`; run things with `uv run ...`.
-- Before committing: `uv run ruff format . && uv run ruff check . && uv run pytest`.
+- Before committing: `uv run ruff format . && uv run ruff check . && uv run pytest`. The tracked pre-commit hook (`.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`) runs the same checks and blocks the commit if they fail.
 - Dev server: `uv run uvicorn checkboxes.api.app:app --reload` (docs at `/docs`).
 - Label Studio is not a project dependency (heavy, conflicting deps); the start script runs it with `uvx`. Its data (users, projects) lives in `~/Library/Application Support/label-studio/`, not in the repo.
