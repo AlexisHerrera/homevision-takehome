@@ -1,0 +1,277 @@
+:root {
+  --checked: #16a34a;
+  --unchecked: #dc2626;
+  --border: #d4d4d8;
+  --muted: #71717a;
+  font-family: system-ui, sans-serif;
+  color: #18181b;
+  background: #fafafa;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0 0 4px;
+}
+
+header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+button {
+  font: inherit;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dropzone {
+  padding: 32px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+  background: white;
+  cursor: pointer;
+}
+
+.dropzone.dragging {
+  border-color: #2563eb;
+}
+
+.dropzone input {
+  display: none;
+}
+
+.samples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.status {
+  margin: 0;
+}
+
+.error {
+  color: var(--unchecked);
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.summary label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.summary label.checked {
+  color: var(--checked);
+}
+
+.summary label.unchecked {
+  color: var(--unchecked);
+}
+
+.summary button {
+  margin-left: auto;
+}
+
+.viewer {
+  position: relative;
+  border: 1px solid var(--border);
+  background: white;
+}
+
+.viewer img {
+  display: block;
+  width: 100%;
+}
+
+.viewer > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.viewer > svg rect {
+  fill: transparent;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.viewer > svg rect.selected {
+  stroke-width: 4;
+}
+
+.crosshair line {
+  stroke: #2563eb;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.tooltip {
+  position: absolute;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgb(24 24 27 / 0.9);
+  color: white;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tooltip.flip {
+  transform: translateX(-100%);
+}
+
+.tooltip .checked {
+  color: #4ade80;
+}
+
+.tooltip .unchecked {
+  color: #f87171;
+}
+
+.detail {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+}
+
+.detail header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.detail header button {
+  padding: 0 8px;
+  font-size: 18px;
+}
+
+.detail svg {
+  display: block;
+}
+
+.detail image {
+  image-rendering: pixelated;
+}
+
+.detail .gutter {
+  fill: white;
+}
+
+.detail .guide {
+  stroke: #2563eb;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.detail text {
+  fill: #2563eb;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail .box {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.detail .box.checked {
+  stroke: var(--checked);
+}
+
+.detail .box.unchecked {
+  stroke: var(--unchecked);
+}
+
+.detail p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail .checked {
+  color: var(--checked);
+}
+
+.detail .unchecked {
+  color: var(--unchecked);
+}
+
+.viewer > svg rect.checked {
+  stroke: var(--checked);
+}
+
+.viewer > svg rect.unchecked {
+  stroke: var(--unchecked);
+}
+
+.viewer > svg rect.checked:hover {
+  fill: rgb(22 163 74 / 0.25);
+}
+
+.viewer > svg rect.unchecked:hover {
+  fill: rgb(220 38 38 / 0.25);
+}
+
+pre {
+  max-height: 400px;
+  overflow: auto;
+  padding: 12px;
+  background: white;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 14px;
+}

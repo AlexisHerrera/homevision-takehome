@@ -1,6 +1,10 @@
 #!/bin/sh
 # Same checks as CI. Enable with: git config core.hooksPath .githooks
 set -e
+cd "$(git rev-parse --show-toplevel)/backend"
 uv run --locked ruff format --check . || { echo "Run: uv run ruff format ."; exit 1; }
 uv run --locked ruff check .
 uv run --locked pytest -q
+cd ../frontend
+npm run --silent lint
+npx tsc -b

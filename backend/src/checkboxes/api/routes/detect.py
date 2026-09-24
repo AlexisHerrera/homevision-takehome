@@ -42,10 +42,5 @@ async def detect_checkboxes(file: UploadFile, settings: Annotated[Settings, Depe
     except ImageTooLargeError as e:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(e)) from e
 
-    logger.info(
-        "detect file=%r boxes=%d ms=%.0f",
-        file.filename,
-        len(result.boxes),
-        (time.perf_counter() - start) * 1000,
-    )
+    logger.info("detect bytes=%d boxes=%d ms=%.0f", len(data), len(result.boxes), (time.perf_counter() - start) * 1000)
     return result

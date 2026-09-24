@@ -13,6 +13,7 @@ def create_app() -> FastAPI:
         title="Checkbox Detection API",
         description="Detect checkboxes in appraisal forms and classify them as checked / unchecked.",
         version="0.1.0",
+        root_path=settings.root_path,
     )
     if settings.cors_origins:
         app.add_middleware(

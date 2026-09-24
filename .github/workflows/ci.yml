@@ -4,28 +4,116 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  AWS_ROLE_ARN: arn:aws:iam::630773215521:role/homevision-checkboxes-github-deploy
+  ECR_REPOSITORY: homevision-checkboxes
 
 jobs:
-  lint-and-test:
+  backend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+          working-directory: backend
       - run: uv sync --locked
       - run: uv run ruff format --check .
       - run: uv run ruff check --output-format=github .
       - run: uv run pytest
 
-  docker:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  terraform:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+      - run: terraform fmt -recursive -check infra
+      - run: terraform -chdir=infra/bootstrap init -backend=false && terraform -chdir=infra/bootstrap validate
+      - run: terraform -chdir=infra init -backend=false && terraform -chdir=infra validate
+
+  docker:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
-          context: .
+          context: backend
+          platforms: linux/arm64
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [backend, frontend, terraform]
+    runs-on: ubuntu-latest
+    concurrency: deploy
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: backend
+          platforms: linux/arm64
+          provenance: false
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+      - run: terraform -chdir=infra init -input=false
+      - run: terraform -chdir=infra apply -input=false -auto-approve -var image_tag=${{ github.sha }}
+        env:
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - name: Upload frontend
+        run: |
+          aws s3 sync frontend/dist "s3://$(terraform -chdir=infra output -raw site_bucket)" --delete
+          aws cloudfront create-invalidation --distribution-id "$(terraform -chdir=infra output -raw distribution_id)" --paths "/*"
+      - name: Smoke test
+        run: curl -fsS --retry 5 --retry-all-errors "$(terraform -chdir=infra output -raw url)/api/health"

@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from checkboxes.api.config import Settings
+from checkboxes.api.app import create_app
+from checkboxes.api.config import Settings, get_settings
 from checkboxes.detector import MODEL_VERSION
 
 from .conftest import DATA_DIR
@@ -55,3 +56,12 @@ def test_rejects_large_upload(client: TestClient) -> None:
 @pytest.mark.parametrize("settings", [Settings(max_pixels=1_000_000)])
 def test_rejects_too_many_pixels(client: TestClient) -> None:
     assert post_file(client, (DATA_DIR / "sample_1.png").read_bytes()).status_code == 413
+
+
+def test_root_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHECKBOXES_ROOT_PATH", "/api")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+    get_settings.cache_clear()
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/openapi.json").json()["servers"] == [{"url": "/api"}]

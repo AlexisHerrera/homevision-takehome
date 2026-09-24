@@ -14,9 +14,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
 FROM python:3.12-slim
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 /lambda-adapter /opt/extensions/lambda-adapter
 RUN useradd --create-home --uid 1000 app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 \
+    AWS_LWA_PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/health
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "checkboxes.api.app:app", "--host", "0.0.0.0", "--port", "8000"]

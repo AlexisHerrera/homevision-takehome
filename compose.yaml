@@ -1,9 +1,21 @@
 services:
   api:
-    build: .
+    build: backend
     ports:
       - "8000:8000"
     env_file:
-      - path: .env
+      - path: backend/.env
         required: false
+    environment:
+      CHECKBOXES_ROOT_PATH: /api
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
     restart: unless-stopped

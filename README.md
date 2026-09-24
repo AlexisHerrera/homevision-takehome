@@ -1,4 +1,4 @@
-# Checkbox detection API
+# Checkbox detection
 
 Detects checkboxes in mortgage appraisal forms (URAR 1004, 1004MC, 1004C, ...) and classifies each as checked or unchecked.
 
@@ -8,14 +8,16 @@ Detects checkboxes in mortgage appraisal forms (URAR 1004, 1004MC, 1004C, ...) a
 docker compose up --build
 ```
 
-The API is at http://localhost:8000 (interactive docs at http://localhost:8000/docs).
+The app is at http://localhost:8080 and the API at http://localhost:8000 (interactive docs at http://localhost:8000/docs).
+
+Layout: `backend/` (detector, API, evaluation tooling and data), `frontend/` (React UI), `infra/` (Terraform).
 
 ## API
 
 `POST /detect` — multipart upload with a `file` field containing a document image (PNG, JPEG, TIFF, BMP or WebP).
 
 ```bash
-curl -F file=@data/sample_1.png http://localhost:8000/detect
+curl -F file=@backend/data/sample_1.png http://localhost:8000/detect
 ```
 
 ```json
@@ -34,7 +36,7 @@ Errors: `413` file size or pixel count over the limit, `415` unsupported file, `
 
 ### Configuration
 
-Environment variables, or a `.env` file (also read by `docker compose`):
+Environment variables, or a `backend/.env` file (also read by `docker compose`):
 
 | Variable | Default | |
 |---|---|---|
@@ -42,20 +44,65 @@ Environment variables, or a `.env` file (also read by `docker compose`):
 | `CHECKBOXES_MAX_PIXELS` | `50000000` | Max pixels per image |
 | `CHECKBOXES_CORS_ORIGINS` | `[]` | Browser origins allowed, e.g. `'["http://localhost:5173"]'` |
 
-## Development
+## Frontend
 
-Requires [uv](https://docs.astral.sh/uv/).
+`frontend/` is a React + TypeScript app (Vite): upload an image or pick a sample, and the boxes are drawn over it (green = checked, red = unchecked).
+
+For live reload while developing:
 
 ```bash
+cd backend && uv run uvicorn checkboxes.api.app:app --reload
+cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api to :8000
+```
+
+`npm run build && npm run preview` serves the production build the same way. Before pushing: `npm run lint && npm run build`.
+
+## Deployment (AWS)
+
+```
+browser ──> CloudFront ──/*──────> S3 (frontend)
+                       └─/api/*──> API Gateway (HTTP API, throttled) ──> Lambda (container image, arm64)
+```
+
+- The API runs on Lambda from the same Docker image, through the [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter); it scales to zero, so idle cost is ~$0.
+- Frontend and API share the CloudFront domain, so there is no CORS.
+- Limits: 4 MB uploads (Lambda's 6 MB payload limit, base64-encoded), 25 MP images, 30 s timeout, 2 requests/s (burst 5).
+- Uploaded images are only held in memory; logs are kept 7 days.
+- A $20 monthly budget emails alerts at $5 (actual), $15 (forecast) and $20; at $20 a kill switch sets the API throttle to 0 (every request gets 429) until the next `terraform apply`.
+
+Infrastructure is Terraform in `infra/`:
+
+- `infra/bootstrap/` (applied once, local state): Terraform state bucket, ECR repository, and the GitHub OIDC role that CI deploys with.
+- `infra/`: Lambda, API Gateway, S3 + CloudFront, budget and kill switch.
+
+Every push to `main` runs CI (`.github/workflows/ci.yml`): lint, tests, frontend build, Terraform validate, then deploy (build and push the image, `terraform apply`, upload the frontend). To deploy by hand:
+
+```bash
+aws sso login --profile homevision
+AWS_PROFILE=homevision scripts/deploy.sh   # alert_email from infra/terraform.tfvars (gitignored) or TF_VAR_alert_email
+```
+
+Tear down everything with `terraform destroy` in `infra/`, then in `infra/bootstrap/`.
+
+### Scaling further
+
+This setup handles one page per synchronous request. For batch processing of whole loan files, the natural next step is asynchronous: upload to S3, enqueue one message per page in SQS, and have Lambda workers (the same image) write results to a store the UI polls, with concurrency and retries handled by the queue.
+
+## Development
+
+Requires [uv](https://docs.astral.sh/uv/). Python commands run from `backend/`.
+
+```bash
+git config core.hooksPath .githooks   # pre-commit hook: backend ruff + pytest, frontend lint + typecheck
+cd backend
 uv sync
-git config core.hooksPath .githooks   # pre-commit hook: ruff format check, ruff check, pytest
 uv run uvicorn checkboxes.api.app:app --reload
 uv run ruff format . && uv run ruff check . && uv run pytest
 ```
 
 ### Evaluating the detector
 
-`data/labels.json` is hand-reviewed ground truth. Score the detector and track changes over time:
+`backend/data/labels.json` is hand-reviewed ground truth. Score the detector and track changes over time:
 
 ```bash
 uv run scripts/evaluate.py --errors                      # metrics + every error

@@ -5,5 +5,5 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .env
-data/holdout/real/
-data/holdout/synthetic/
+backend/data/holdout/real/
+backend/data/holdout/synthetic/

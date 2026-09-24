@@ -1,0 +1,6 @@
+**
+!frontend
+!backend/data/sample_*
+frontend/node_modules
+frontend/dist
+frontend/public/samples

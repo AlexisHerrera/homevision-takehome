@@ -6,7 +6,9 @@
 
 ## Project
 
-Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004, 1004MC, 1004C) and classify each as `checked` / `unchecked`.
+Detect checkboxes in US mortgage appraisal form images (`backend/data/`, e.g. URAR 1004, 1004MC, 1004C) and classify each as `checked` / `unchecked`.
+
+Layout: `backend/` (Python project: detector, API, evaluation tooling, data), `frontend/` (React UI), `infra/` (Terraform). Paths below under `src/`, `scripts/`, `data/`, `tests/`, `evaluations/`, `label_studio/` are relative to `backend/`; run Python commands from there.
 
 - `src/checkboxes/detector.py` — OpenCV detector core: `detect(image, params=DetectorParams()) -> list[Detection]`, no I/O. Tunables live in the frozen `DetectorParams` dataclass. Bump `MODEL_VERSION` when its logic or parameters change.
 - `src/checkboxes/images.py` — decodes uploaded images (OpenCV) and enforces the pixel limit.
@@ -18,12 +20,16 @@ Detect checkboxes in US mortgage appraisal form images (`data/`, e.g. URAR 1004,
 - `evaluations/known-issues.md` — the detector's open problems on the held-out sets, current numbers, and the session workflow for improving it. Start detector work there and update it at the end. The explanation of each detector change goes in its commit message, not in files.
 - `tests/test_samples.py` — fails on any regression on the 4 samples in `data/labels.json`.
 - `label_studio/labeling_config.xml` — Label Studio config (RectangleLabels `checked` / `unchecked`, `from_name="label"`, `to_name="image"`; must match the detector output).
-- `scripts/start_label_studio.sh` — starts Label Studio (via `uvx`, isolated from the project env) with local file serving rooted at the repo.
-- `Dockerfile`, `compose.yaml` — production image of the API (uv multi-stage, non-root, port 8000); `docker compose up --build` runs it.
+- `scripts/start_label_studio.sh` — starts Label Studio (via `uvx`, isolated from the project env) with local file serving rooted at `backend/`.
+- `backend/Dockerfile` — production image of the API (uv multi-stage, non-root, port 8000). The same image runs on Lambda via the Lambda Web Adapter extension (inert outside Lambda).
+- `compose.yaml` (repo root) — `docker compose up --build` runs the API (:8000) and the frontend behind nginx (:8080, `/api` proxied like CloudFront; `frontend/Dockerfile`, `frontend/nginx.conf`).
+- `frontend/` — React + TypeScript (Vite) UI calling `/api/*`; `npm run dev` proxies `/api` to `localhost:8000`. Samples are copied from `backend/data/` at dev/build time.
+- `infra/` — Terraform. `infra/bootstrap/` (local state, applied once): state bucket, ECR, GitHub OIDC deploy role. `infra/`: Lambda (arm64, `CHECKBOXES_ROOT_PATH=/api`), API Gateway HTTP API (throttled), S3 + CloudFront, $20 budget + kill switch. Region `us-west-2`, account pinned with `allowed_account_ids`; always use `AWS_PROFILE=homevision`.
+- `.github/workflows/ci.yml` — lint/test/frontend/terraform checks; on `main` also deploys (OIDC role). `scripts/deploy.sh` (repo root) does the same deploy by hand.
 
 ## Environment
 
-- Managed with uv (Python 3.12, `.python-version`). `uv sync` creates `.venv/`; run things with `uv run ...`.
-- Before committing: `uv run ruff format . && uv run ruff check . && uv run pytest`. The tracked pre-commit hook (`.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`) runs the same checks and blocks the commit if they fail.
+- Backend managed with uv (Python 3.12, `backend/.python-version`). `uv sync` in `backend/` creates `backend/.venv/`; run things with `uv run ...`.
+- Before committing: in `backend/`, `uv run ruff format . && uv run ruff check . && uv run pytest`; in `frontend/`, `npm run lint && npm run build`. The tracked pre-commit hook (`.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`) runs these checks and blocks the commit if they fail.
 - Dev server: `uv run uvicorn checkboxes.api.app:app --reload` (docs at `/docs`).
 - Label Studio is not a project dependency (heavy, conflicting deps); the start script runs it with `uvx`. Its data (users, projects) lives in `~/Library/Application Support/label-studio/`, not in the repo.

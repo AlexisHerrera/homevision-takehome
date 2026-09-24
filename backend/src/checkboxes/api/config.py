@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 20 * 1024 * 1024
     max_pixels: int = 50_000_000
     cors_origins: list[str] = []
+    root_path: str = ""
 
 
 @lru_cache
