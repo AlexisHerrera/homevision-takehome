@@ -75,3 +75,21 @@ resource "aws_lambda_permission" "api" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }
+
+# Invokes the function every 5 minutes so an instance stays warm (Lambda recycles idle ones).
+resource "aws_cloudwatch_event_rule" "keep_warm" {
+  name                = "${local.name}-keep-warm"
+  schedule_expression = "rate(5 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "keep_warm" {
+  rule = aws_cloudwatch_event_rule.keep_warm.name
+  arn  = aws_lambda_function.api.arn
+}
+
+resource "aws_lambda_permission" "keep_warm" {
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.keep_warm.arn
+}
