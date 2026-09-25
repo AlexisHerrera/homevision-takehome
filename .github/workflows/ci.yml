@@ -114,7 +114,11 @@ jobs:
         working-directory: frontend
       - name: Upload frontend
         run: |
-          aws s3 sync frontend/dist "s3://$(terraform -chdir=infra output -raw site_bucket)" --delete
-          aws cloudfront create-invalidation --distribution-id "$(terraform -chdir=infra output -raw distribution_id)" --paths "/*"
+          bucket=s3://$(terraform -chdir=infra output -raw site_bucket)
+          distribution=$(terraform -chdir=infra output -raw distribution_id)
+          aws s3 sync frontend/dist "$bucket"
+          invalidation=$(aws cloudfront create-invalidation --distribution-id "$distribution" --paths "/*" --query Invalidation.Id --output text)
+          aws cloudfront wait invalidation-completed --distribution-id "$distribution" --id "$invalidation"
+          aws s3 sync frontend/dist "$bucket" --delete
       - name: Smoke test
         run: curl -fsS --retry 5 --retry-all-errors "$(terraform -chdir=infra output -raw url)/api/health"

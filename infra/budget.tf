@@ -71,11 +71,18 @@ resource "aws_iam_role_policy" "kill_switch" {
   role = aws_iam_role.kill_switch.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "apigateway:PATCH"
-      Resource = "arn:aws:apigateway:us-west-2::/apis/${aws_apigatewayv2_api.api.id}/stages/*"
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "apigateway:PATCH"
+        Resource = "arn:aws:apigateway:us-west-2::/apis/${aws_apigatewayv2_api.api.id}/stages/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "lambda:PutFunctionConcurrency"
+        Resource = aws_lambda_function.api.arn
+      },
+    ]
   })
 }
 
@@ -87,7 +94,10 @@ resource "aws_lambda_function" "kill_switch" {
   filename         = data.archive_file.kill_switch.output_path
   source_code_hash = data.archive_file.kill_switch.output_base64sha256
   environment {
-    variables = { API_ID = aws_apigatewayv2_api.api.id }
+    variables = {
+      API_ID        = aws_apigatewayv2_api.api.id
+      FUNCTION_NAME = aws_lambda_function.api.function_name
+    }
   }
 }
 

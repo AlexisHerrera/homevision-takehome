@@ -11,7 +11,7 @@ Detect checkboxes in US mortgage appraisal form images (`backend/data/`, e.g. UR
 Layout: `backend/` (Python project: detector, API, evaluation tooling, data), `frontend/` (React UI), `infra/` (Terraform). Paths below under `src/`, `scripts/`, `data/`, `tests/`, `evaluations/`, `label_studio/` are relative to `backend/`; run Python commands from there.
 
 - `src/checkboxes/detector.py` — OpenCV detector core: `detect(image, params=DetectorParams()) -> list[Detection]`, no I/O. Tunables live in the frozen `DetectorParams` dataclass. Bump `MODEL_VERSION` when its logic or parameters change.
-- `src/checkboxes/images.py` — decodes uploaded images (OpenCV) and enforces the pixel limit.
+- `src/checkboxes/images.py` — checks the pixel limit from the image header (Pillow) before decoding with OpenCV.
 - `src/checkboxes/api/` — FastAPI app (`app.py` factory, `config.py` settings from `CHECKBOXES_*` env vars, `schemas.py`, `routes/`). `POST /detect` (multipart `file`) returns `{"boxes": [{"bbox": [x1, y1, x2, y2], "is_checked"}]}`; `GET /health`.
 - `scripts/detect_checkboxes.py` — CLI: writes Label Studio pre-annotations to `output/tasks.json`; `--debug output/debug` writes overlay images (green = checked, red = unchecked).
 - `data/labels.json` — hand-reviewed ground truth (Label Studio JSON export: detector pre-annotations corrected in the UI). Use it to evaluate the detector.

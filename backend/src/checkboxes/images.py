@@ -1,5 +1,12 @@
+from io import BytesIO
+
 import cv2
 import numpy as np
+from PIL import Image
+
+Image.MAX_IMAGE_PIXELS = None  # decode_image enforces its own limit
+
+UNSUPPORTED_MESSAGE = "File is not a supported image (PNG, JPEG, TIFF, BMP, WebP)"
 
 
 class UnsupportedImageError(ValueError):
@@ -11,10 +18,16 @@ class ImageTooLargeError(ValueError):
 
 
 def decode_image(data: bytes, *, max_pixels: int) -> np.ndarray:
-    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-    if image is None:
-        raise UnsupportedImageError("File is not a supported image (PNG, JPEG, TIFF, BMP, WebP)")
-    height, width = image.shape[:2]
+    try:
+        with Image.open(BytesIO(data)) as header:
+            width, height = header.size
+    except OSError as e:
+        raise UnsupportedImageError(UNSUPPORTED_MESSAGE) from e
+
     if width * height > max_pixels:
         raise ImageTooLargeError(f"Image is {width}x{height} px; the limit is {max_pixels:,} pixels")
+
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise UnsupportedImageError(UNSUPPORTED_MESSAGE)
     return image
