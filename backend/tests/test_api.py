@@ -22,6 +22,7 @@ def test_health(client: TestClient) -> None:
 def test_detect_image(client: TestClient, name: str, expected: int) -> None:
     response = post_file(client, (DATA_DIR / name).read_bytes(), name)
     assert response.status_code == 200
+    assert response.headers["server-timing"].startswith("decode;dur=")
     body = response.json()
     assert body.keys() == {"boxes"}
     assert len(body["boxes"]) == expected

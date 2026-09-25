@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 
 from checkboxes.api.config import Settings, get_settings
@@ -15,9 +15,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["detection"])
 
 
-def run_detection(data: bytes, settings: Settings) -> DetectResponse:
+def run_detection(data: bytes, settings: Settings) -> tuple[DetectResponse, float, float]:
+    start = time.perf_counter()
     image = decode_image(data, max_pixels=settings.max_pixels)
-    return DetectResponse(boxes=[Box(bbox=d.bbox, is_checked=d.is_checked) for d in detect(image)])
+    decoded = time.perf_counter()
+    boxes = [Box(bbox=d.bbox, is_checked=d.is_checked) for d in detect(image)]
+    return DetectResponse(boxes=boxes), (decoded - start) * 1000, (time.perf_counter() - decoded) * 1000
 
 
 @router.post(
@@ -27,20 +30,28 @@ def run_detection(data: bytes, settings: Settings) -> DetectResponse:
         status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {"description": "Not a supported image"},
     },
 )
-async def detect_checkboxes(file: UploadFile, settings: Annotated[Settings, Depends(get_settings)]) -> DetectResponse:
+async def detect_checkboxes(
+    file: UploadFile, response: Response, settings: Annotated[Settings, Depends(get_settings)]
+) -> DetectResponse:
     """Detect checkboxes in a document image and classify each as checked / unchecked."""
     data = await file.read(settings.max_upload_bytes + 1)
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, f"File exceeds {settings.max_upload_bytes:,} bytes")
 
-    start = time.perf_counter()
     try:
         # CPU-bound
-        result = await run_in_threadpool(run_detection, data, settings)
+        result, decode_ms, detect_ms = await run_in_threadpool(run_detection, data, settings)
     except UnsupportedImageError as e:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(e)) from e
     except ImageTooLargeError as e:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(e)) from e
 
-    logger.info("detect bytes=%d boxes=%d ms=%.0f", len(data), len(result.boxes), (time.perf_counter() - start) * 1000)
+    response.headers["Server-Timing"] = f"decode;dur={decode_ms:.0f}, detect;dur={detect_ms:.0f}"
+    logger.info(
+        "detect bytes=%d boxes=%d decode_ms=%.0f ms=%.0f",
+        len(data),
+        len(result.boxes),
+        decode_ms,
+        decode_ms + detect_ms,
+    )
     return result

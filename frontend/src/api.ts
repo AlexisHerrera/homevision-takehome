@@ -15,11 +15,21 @@ export async function health(): Promise<{ status: string; model_version: string 
   return response.json()
 }
 
-export async function detect(file: Blob, signal?: AbortSignal): Promise<DetectResponse> {
+export interface Detection {
+  result: DetectResponse
+  serverMs?: number
+}
+
+function serverMs(header: string | null): number | undefined {
+  const durations = [...(header ?? '').matchAll(/dur=([\d.]+)/g)].map((m) => Number(m[1]))
+  return durations.length ? durations.reduce((a, b) => a + b) : undefined
+}
+
+export async function detect(file: Blob, signal?: AbortSignal): Promise<Detection> {
   const body = new FormData()
   body.append('file', file)
   const response = await fetch('/api/detect', { method: 'POST', body, signal })
-  if (response.ok) return response.json()
+  if (response.ok) return { result: await response.json(), serverMs: serverMs(response.headers.get('Server-Timing')) }
   if (response.status === 429 || response.status === 503) throw new Error('Too many requests, try again in a moment.')
   const detail = await response
     .json()

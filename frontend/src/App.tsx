@@ -6,8 +6,8 @@ const SAMPLES = ['sample_1.png', 'sample_2.jpg', 'sample_3.png', 'sample_4.png']
 
 type State =
   | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'done'; result: DetectResponse; ms: number }
+  | { status: 'loading'; phase: 'fetching' | 'detecting' }
+  | { status: 'done'; result: DetectResponse; ms: number; serverMs?: number }
   | { status: 'error'; message: string }
 
 async function timed<T>(promise: Promise<T>): Promise<[T, number]> {
@@ -33,32 +33,35 @@ export default function App() {
 
   useEffect(() => () => image && URL.revokeObjectURL(image.url), [image])
 
-  async function run(file: Blob, name: string) {
+  async function run(name: string, getFile: (signal: AbortSignal) => Promise<Blob>) {
     controller.current?.abort()
-    setImage({ url: URL.createObjectURL(file), name })
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setState({ status: 'error', message: `File is over ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` })
-      return
-    }
     const current = new AbortController()
     controller.current = current
-    setState({ status: 'loading' })
+    setImage(undefined)
+    setState({ status: 'loading', phase: 'fetching' })
     try {
-      const [result, ms] = await timed(detect(file, current.signal))
-      setState({ status: 'done', result, ms })
+      const file = await getFile(current.signal)
+      setImage({ url: URL.createObjectURL(file), name })
+      if (file.size > MAX_UPLOAD_BYTES) throw new Error(`File is over ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`)
+      setState({ status: 'loading', phase: 'detecting' })
+      const [{ result, serverMs }, ms] = await timed(detect(file, current.signal))
+      setState({ status: 'done', result, ms, serverMs })
     } catch (e) {
       if (!current.signal.aborted) setState({ status: 'error', message: (e as Error).message })
     }
   }
 
-  async function runSample(name: string) {
-    const response = await fetch(`/samples/${name}`)
-    run(await response.blob(), name)
+  function runSample(name: string) {
+    run(name, async (signal) => {
+      const response = await fetch(`/samples/${name}`, { signal })
+      if (!response.ok) throw new Error(`Could not load ${name} (${response.status})`)
+      return response.blob()
+    })
   }
 
   function onFiles(files: FileList | null) {
     const file = files?.[0]
-    if (file) run(file, file.name)
+    if (file) run(file.name, async () => file)
   }
 
   function downloadJson(result: DetectResponse) {
@@ -117,13 +120,20 @@ export default function App() {
         </div>
       </section>
 
-      {state.status === 'loading' && <p className="status">Detecting…</p>}
+      {state.status === 'loading' && (
+        <p className="status" role="status">
+          <span className="spinner" />
+          {state.phase === 'fetching' ? 'Loading sample…' : 'Detecting checkboxes…'}
+        </p>
+      )}
       {state.status === 'error' && <p className="status error">{state.message}</p>}
       {state.status === 'done' && (
         <section className="summary">
           <span>
             <strong>{boxes.length}</strong> boxes · <strong>{checked}</strong> checked ·{' '}
-            <strong>{boxes.length - checked}</strong> unchecked · {Math.round(state.ms)} ms
+            <strong>{boxes.length - checked}</strong> unchecked ·{' '}
+            {state.serverMs !== undefined && <>detection {Math.round(state.serverMs)} ms · </>}
+            total {Math.round(state.ms)} ms
           </span>
           <label className="checked">
             <input type="checkbox" checked={showChecked} onChange={(e) => setShowChecked(e.target.checked)} />
@@ -144,6 +154,7 @@ export default function App() {
           boxes={boxes}
           showChecked={showChecked}
           showUnchecked={showUnchecked}
+          scanning={state.status === 'loading'}
         />
       )}
 

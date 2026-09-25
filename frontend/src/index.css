@@ -75,6 +75,9 @@ button:disabled {
 }
 
 .status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
 }
 
@@ -274,4 +277,57 @@ footer {
   justify-content: space-between;
   color: var(--muted);
   font-size: 14px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.scan {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: rgb(37 99 235 / 0.05);
+  pointer-events: none;
+}
+
+.scan::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: linear-gradient(to bottom, rgb(37 99 235 / 0), rgb(37 99 235 / 0.25) 90%, #2563eb);
+  animation: scan 1.8s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes scan {
+  from {
+    top: -80px;
+  }
+  to {
+    top: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .scan::after {
+    animation: none;
+  }
+
+  .scan::after {
+    display: none;
+  }
 }
