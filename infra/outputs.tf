@@ -9,3 +9,7 @@ output "site_bucket" {
 output "distribution_id" {
   value = aws_cloudfront_distribution.site.id
 }
+
+output "custom_url" {
+  value = var.domain_name == "" ? null : "https://${var.domain_name}"
+}
