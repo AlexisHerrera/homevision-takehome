@@ -1,4 +1,6 @@
 import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,14 +9,24 @@ from fastapi.responses import JSONResponse
 from checkboxes.api.config import get_settings
 from checkboxes.api.routes import detect, health
 
+WARM_UP_IMAGE = Path(__file__).with_name("warm_up.png")
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # The first detection is several times slower than the rest, so run it before serving requests.
+        detect.run_detection(WARM_UP_IMAGE.read_bytes(), settings)
+        yield
+
     app = FastAPI(
         title="Checkbox Detection API",
         description="Detect checkboxes in appraisal forms and classify them as checked / unchecked.",
         version="0.1.0",
         root_path=settings.root_path,
+        lifespan=lifespan,
     )
 
     @app.middleware("http")

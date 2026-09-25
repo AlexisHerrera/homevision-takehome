@@ -24,9 +24,11 @@ export default function App() {
   const [modelVersion, setModelVersion] = useState<string>()
   const [dragging, setDragging] = useState(false)
   const controller = useRef<AbortController>(null)
+  // Loading the page starts the backend (and its warm-up); detections wait for it so they reuse that instance.
+  const backendReady = useRef<Promise<void>>(null)
 
   useEffect(() => {
-    health()
+    backendReady.current = health()
       .then((h) => setModelVersion(h.model_version))
       .catch(() => {})
   }, [])
@@ -44,6 +46,7 @@ export default function App() {
       setImage({ url: URL.createObjectURL(file), name })
       if (file.size > MAX_UPLOAD_BYTES) throw new Error(`File is over ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`)
       setState({ status: 'loading', phase: 'detecting' })
+      await backendReady.current
       const [{ result, serverMs }, ms] = await timed(detect(file, current.signal))
       setState({ status: 'done', result, ms, serverMs })
     } catch (e) {
