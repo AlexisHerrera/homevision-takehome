@@ -16,5 +16,5 @@ variable "monthly_budget_usd" {
 variable "domain_name" {
   type        = string
   default     = ""
-  description = "Optional custom domain with a Route 53 hosted zone in this account; the cloudfront.net URL keeps working"
+  description = "Optional custom domain, e.g. app.example.com, whose parent (or itself, if it is an apex) is a Route 53 hosted zone in this account; the cloudfront.net URL keeps working"
 }

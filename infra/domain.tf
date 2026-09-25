@@ -7,11 +7,13 @@ provider "aws" {
 
 locals {
   domain = var.domain_name == "" ? [] : [var.domain_name]
+  labels = split(".", var.domain_name)
+  zone   = length(local.labels) > 2 ? join(".", slice(local.labels, 1, length(local.labels))) : var.domain_name
 }
 
 data "aws_route53_zone" "site" {
   for_each = toset(local.domain)
-  name     = each.value
+  name     = local.zone
 }
 
 resource "aws_acm_certificate" "site" {
