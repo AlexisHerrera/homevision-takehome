@@ -1,6 +1,11 @@
 # Checkbox detection
 
-Detects checkboxes in mortgage appraisal forms (URAR 1004, 1004MC, 1004C, ...) and classifies each as checked or unchecked.
+Detects checkboxes in mortgage appraisal forms and classifies each as checked or unchecked.
+
+- Live demo: https://homevision.alexisherrera.dev
+- GitHub repo: https://github.com/AlexisHerrera/homevision-takehome
+
+<!-- Demo GIF: paste it here -->
 
 ## Run
 
@@ -23,8 +28,8 @@ curl -F file=@backend/data/sample_1.png http://localhost:8000/detect
 ```json
 {
   "boxes": [
-    {"bbox": [333, 510, 383, 550], "is_checked": true},
-    {"bbox": [491, 510, 542, 550], "is_checked": false}
+    { "bbox": [333, 510, 383, 550], "is_checked": true },
+    { "bbox": [491, 510, 542, 550], "is_checked": false }
   ]
 }
 ```
@@ -38,11 +43,11 @@ Errors: `413` file size or pixel count over the limit, `415` unsupported file, `
 
 Environment variables, or a `backend/.env` file (also read by `docker compose`):
 
-| Variable | Default | |
-|---|---|---|
-| `CHECKBOXES_MAX_UPLOAD_BYTES` | `20971520` | Max upload size (20 MB) |
-| `CHECKBOXES_MAX_PIXELS` | `50000000` | Max pixels per image |
-| `CHECKBOXES_CORS_ORIGINS` | `[]` | Browser origins allowed, e.g. `'["http://localhost:5173"]'` |
+| Variable                      | Default    |                                                             |
+| ----------------------------- | ---------- | ----------------------------------------------------------- |
+| `CHECKBOXES_MAX_UPLOAD_BYTES` | `20971520` | Max upload size (20 MB)                                     |
+| `CHECKBOXES_MAX_PIXELS`       | `50000000` | Max pixels per image                                        |
+| `CHECKBOXES_CORS_ORIGINS`     | `[]`       | Browser origins allowed, e.g. `'["http://localhost:5173"]'` |
 
 ## Frontend
 
