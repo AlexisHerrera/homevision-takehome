@@ -5,7 +5,7 @@ Detects checkboxes in mortgage appraisal forms and classifies each as checked or
 - Live demo: https://homevision.alexisherrera.dev
 - GitHub repo: https://github.com/AlexisHerrera/homevision-takehome
 
-<!-- Demo GIF: paste it here -->
+<img width="740" height="480" alt="live_demo" src="https://github.com/user-attachments/assets/1d512369-9eeb-4a81-830f-5ecdaec8b4f3" />
 
 ## Run
 
