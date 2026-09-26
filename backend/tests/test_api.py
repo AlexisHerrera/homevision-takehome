@@ -1,5 +1,8 @@
+from io import BytesIO
+
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from checkboxes.api.app import create_app
 from checkboxes.api.config import Settings, get_settings
@@ -37,6 +40,12 @@ def test_detect_image(client: TestClient, name: str, expected: int) -> None:
 def test_rejects_unsupported_file(client: TestClient) -> None:
     response = post_file(client, b"just some text", "notes.txt")
     assert response.status_code == 415
+
+
+def test_rejects_other_image_formats(client: TestClient) -> None:
+    gif = BytesIO()
+    Image.new("L", (10, 10)).save(gif, "GIF")
+    assert post_file(client, gif.getvalue(), "doc.png").status_code == 415
 
 
 def test_rejects_corrupt_image(client: TestClient) -> None:

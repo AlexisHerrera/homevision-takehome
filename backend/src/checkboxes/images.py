@@ -6,6 +6,8 @@ from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None  # decode_image enforces its own limit
 
+# Checked against the file's contents; the filename and declared content type are ignored.
+FORMATS = ("PNG", "JPEG", "TIFF", "BMP", "WEBP")
 UNSUPPORTED_MESSAGE = "File is not a supported image (PNG, JPEG, TIFF, BMP, WebP)"
 
 
@@ -19,7 +21,7 @@ class ImageTooLargeError(ValueError):
 
 def decode_image(data: bytes, *, max_pixels: int) -> np.ndarray:
     try:
-        with Image.open(BytesIO(data)) as header:
+        with Image.open(BytesIO(data), formats=FORMATS) as header:
             width, height = header.size
     except OSError as e:
         raise UnsupportedImageError(UNSUPPORTED_MESSAGE) from e

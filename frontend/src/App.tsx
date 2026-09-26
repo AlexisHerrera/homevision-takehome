@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { detect, health, MAX_UPLOAD_BYTES, type DetectResponse } from './api'
+import { ACCEPTED_TYPES, detect, health, MAX_UPLOAD_BYTES, type DetectResponse } from './api'
 import { Viewer } from './Viewer'
 
 const SAMPLES = ['sample_1.png', 'sample_2.jpg', 'sample_3.png', 'sample_4.png']
@@ -64,7 +64,11 @@ export default function App() {
 
   function onFiles(files: FileList | null) {
     const file = files?.[0]
-    if (file) run(file.name, async () => file)
+    if (!file) return
+    run(file.name, async () => {
+      if (!ACCEPTED_TYPES.includes(file.type)) throw new Error('Unsupported file type, use a PNG, JPEG or WebP image.')
+      return file
+    })
   }
 
   function downloadJson(result: DetectResponse) {
@@ -105,7 +109,7 @@ export default function App() {
         >
           <input
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept={ACCEPTED_TYPES.join(',')}
             onChange={(e) => {
               onFiles(e.target.files)
               e.target.value = ''

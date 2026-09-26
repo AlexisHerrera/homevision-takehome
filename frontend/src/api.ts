@@ -8,6 +8,8 @@ export interface DetectResponse {
 }
 
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024
+// Drag and drop ignores the input's accept attribute; the backend checks the contents.
+export const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 
 export async function health(): Promise<{ status: string; model_version: string }> {
   const response = await fetch('/api/health')
