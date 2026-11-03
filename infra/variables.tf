@@ -1,3 +1,8 @@
+variable "account_id" {
+  type        = string
+  description = "AWS account to deploy to (the AWS_ACCOUNT_ID GitHub secret in CI)"
+}
+
 variable "image_tag" {
   type        = string
   description = "Tag of the API image in ECR (the git commit SHA)"

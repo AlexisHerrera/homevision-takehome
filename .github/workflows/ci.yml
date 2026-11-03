@@ -10,7 +10,7 @@ on:
 
 env:
   AWS_REGION: us-west-2
-  AWS_ROLE_ARN: arn:aws:iam::630773215521:role/homevision-checkboxes-github-deploy
+  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/homevision-checkboxes-github-deploy
   ECR_REPOSITORY: homevision-checkboxes
 
 jobs:
@@ -101,9 +101,10 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
-      - run: terraform -chdir=infra init -input=false
+      - run: terraform -chdir=infra init -input=false -backend-config=bucket=homevision-checkboxes-tfstate-${{ secrets.AWS_ACCOUNT_ID }}
       - run: terraform -chdir=infra apply -input=false -auto-approve -var image_tag=${{ github.sha }}
         env:
+          TF_VAR_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
           TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
           TF_VAR_domain_name: ${{ vars.DOMAIN_NAME }}
 

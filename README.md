@@ -77,12 +77,13 @@ browser ──> CloudFront ──/*──────> S3 (frontend)
 
 Infrastructure is Terraform in `infra/`:
 
-- `infra/bootstrap/` (applied once, local state): Terraform state bucket, ECR repository, and the GitHub OIDC role that CI deploys with.
+- `infra/bootstrap/` (applied once, local state, `TF_VAR_account_id` set): Terraform state bucket, ECR repository, and the GitHub OIDC role that CI deploys with.
 - `infra/`: Lambda, API Gateway, S3 + CloudFront, budget and kill switch.
 
-Every push to `main` runs CI (`.github/workflows/ci.yml`): lint, tests, frontend build, Terraform validate, then deploy (build and push the image, `terraform apply`, upload the frontend). To deploy by hand:
+Every push to `main` runs CI (`.github/workflows/ci.yml`): lint, tests, frontend build, Terraform validate, then deploy (build and push the image, `terraform apply`, upload the frontend). The AWS account ID is not in the repo: CI reads it from the `AWS_ACCOUNT_ID` secret. To deploy by hand:
 
 ```bash
+echo 'AWS_ACCOUNT_ID=<account id>' > .env   # once
 aws sso login --profile homevision
 AWS_PROFILE=homevision scripts/deploy.sh   # alert_email from infra/terraform.tfvars (gitignored) or TF_VAR_alert_email
 ```

@@ -5,9 +5,14 @@ terraform {
   }
 }
 
+variable "account_id" {
+  type        = string
+  description = "AWS account to deploy to (the AWS_ACCOUNT_ID GitHub secret in CI)"
+}
+
 provider "aws" {
   region              = "us-west-2"
-  allowed_account_ids = ["630773215521"]
+  allowed_account_ids = [var.account_id]
   default_tags { tags = { Project = "homevision-checkboxes" } }
 }
 

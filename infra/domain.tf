@@ -1,7 +1,7 @@
 provider "aws" {
   alias               = "us_east_1"
   region              = "us-east-1"
-  allowed_account_ids = ["630773215521"]
+  allowed_account_ids = [var.account_id]
   default_tags { tags = { Project = "homevision-checkboxes" } }
 }
 
