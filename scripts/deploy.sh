@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Same steps as the deploy job in .github/workflows/ci.yml.
 # Usage: AWS_PROFILE=homevision scripts/deploy.sh
-# alert_email and domain_name come from infra/terraform.tfvars or TF_VAR_*, like the ALERT_EMAIL and DOMAIN_NAME GitHub variables.
+# alert_email and domain_name come from infra/terraform.tfvars or TF_VAR_*, like the ALERT_EMAIL GitHub secret and DOMAIN_NAME GitHub variable.
 # AWS_ACCOUNT_ID (like the GitHub secret) comes from the environment or a .env file at the repo root (gitignored).
 set -euo pipefail
 cd "$(dirname "$0")/.."
